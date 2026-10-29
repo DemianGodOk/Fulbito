@@ -1,0 +1,24 @@
+No serán más de 15 a 20 usuarios...
+La idea es hacer una App que pueda ser utilizada por diferentes grupos de amigos.
+Funciones (todas configurables):
+- Lista de titulares
+- Lista de suplentes
+- Dia y hora del partido 
+- Nombre y datos de la cancha
+- Cantidad de jugadores admitida por la cancha
+- Notificaciones a los titulares en determinado momento de la semana
+- Notificaciones a los suplentes en caso que los titulares no hayan llenado el cupo
+- Cada jugador notificado que pueda confirmar si asiste o no
+- Función para cancelar en caso de imprevisto
+- Que vuelva a enviar notificación a los suplentes disponibles en caso de cancelación
+- Login con google account
+- Aviso a todos en caso de completar el cupo
+- Guardado de info en DB
+- Detalle de los jugadores (datos personales/foto)
+- En otro apartado que un moderador pueda cargar una lista de qué jugadores hubo en cada equipo luego del partido y especifique con qué resultado terminó el partido
+- Los jugadores que ganen suman 3 puntos, si el partido sale empatado todos suman 1 punto, y los que pierden no suman.
+- Llevar un track de partidos jugados, partidos ganados, perdidos, empatados, por jugador y por TODOS los jugadores, y sus puntos y promedios.
+- Poder hacer diferentes estadísticas y ver los resultados
+- Ésto debe estar aislado para cada "GRUPO DE AMIGOS", los que juegan solo los lunes tienen un nombre y no pueden ver la información de los que juegan los viernes y viseversa (los días de la semana son solo un ejemplo), grupos separados con datos separados.
+- Lista de rotación: el titular con más partidos jugados queda afuera si el resto de los titulares confirma asistencia, si un jugador no juega, pasa a la última posición entre los candidatos a quedar fuera
+- Lista de lavado de camisetas: Una lista de rotación entre titulares para saber a quién le toca lavarlas.
