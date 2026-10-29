@@ -1,4 +1,4 @@
-package com.example.fulbito
+package com.svfc.fulbito
 
 import io.flutter.embedding.android.FlutterActivity
 

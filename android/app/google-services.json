@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "112754897657",
+    "project_id": "fulbito-svfc",
+    "storage_bucket": "fulbito-svfc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:112754897657:android:7b87d6d3dcd9d6d2322828",
+        "android_client_info": {
+          "package_name": "com.svfc.fulbito"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "112754897657-pa59skf85a24atdas4u5kqsters5nvl9.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.svfc.fulbito",
+            "certificate_hash": "5061e3b6dc679b6ef2f0852f4c81ab137e013063"
+          }
+        },
+        {
+          "client_id": "112754897657-fbbqh67pk8h7a1g6h9hvl521be32f6rn.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD72wWwlYchz2znB4u3WGssGwOZp4XnBaI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "112754897657-fbbqh67pk8h7a1g6h9hvl521be32f6rn.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
