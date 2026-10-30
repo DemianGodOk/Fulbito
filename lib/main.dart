@@ -7,15 +7,15 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:ota_update/ota_update.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
 // ============================================================================
-// CONFIGURACIÓN DE ACCESOS, GITHUB Y VERSIÓN
+// CONFIGURACIÓN DE ACCESOS, GITHUB Y VERSIÓN UNIFICADA
 // ============================================================================
-const String kAppVersion = '1.0.8';
+String gAppVersion = '1.0.10';
 const String kGitHubUser = 'DemianGodOk';
 const String kGitHubRepo = 'Fulbito';
 
@@ -39,7 +39,7 @@ Future<void> inicializarNotificaciones() async {
       InitializationSettings(android: initializationSettingsAndroid);
 
   await flutterLocalNotificationsPlugin.initialize(
-    settings: initializationSettings,
+    initializationSettings,
   );
 
   final androidImpl = flutterLocalNotificationsPlugin
@@ -64,10 +64,10 @@ Future<void> mostrarNotificacion({
 
   const NotificationDetails details = NotificationDetails(android: androidDetails);
   await flutterLocalNotificationsPlugin.show(
-    id: id,
-    title: titulo,
-    body: cuerpo,
-    notificationDetails: details,
+    id,
+    titulo,
+    cuerpo,
+    details,
   );
 }
 
@@ -80,11 +80,11 @@ Future<void> programarRecordatorioAsistencia({
 
   try {
     await flutterLocalNotificationsPlugin.zonedSchedule(
-      id: 900,
-      title: '⚽ Recordatorio de Asistencia S.V.F.C.',
-      body: 'Recordá confirmar si jugás el $partidoTexto.',
-      scheduledDate: tz.TZDateTime.from(fechaHora, tz.local),
-      notificationDetails: const NotificationDetails(
+      900,
+      '⚽ Recordatorio de Asistencia Fulbito',
+      'Recordá confirmar si jugás el $partidoTexto.',
+      tz.TZDateTime.from(fechaHora, tz.local),
+      const NotificationDetails(
         android: AndroidNotificationDetails(
           'fulbito_recordatorios_channel',
           'Recordatorios Programados',
@@ -93,6 +93,8 @@ Future<void> programarRecordatorioAsistencia({
           priority: Priority.high,
         ),
       ),
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
     );
   } catch (e) {
@@ -132,8 +134,10 @@ class Jugador {
 }
 
 String limpiarNombre(String? raw) {
-  if (raw == null || raw.trim().isEmpty) return 'Jugador S.V.F.C.';
-  return raw.replaceAll(RegExp(r'\s*\([^)]*\)'), '').trim();
+  if (raw == null || raw.trim().isEmpty) return '';
+  final limpio = raw.replaceAll(RegExp(r'\s*\([^)]*\)'), '').trim();
+  if (limpio.toLowerCase() == 'jugador s.v.f.c.') return '';
+  return limpio;
 }
 
 String _normalizar(String s) {
@@ -150,6 +154,7 @@ String _normalizar(String s) {
 bool sonElMismoJugador(String nombreA, String nombreB) {
   final a = _normalizar(nombreA);
   final b = _normalizar(nombreB);
+  if (a.isEmpty || b.isEmpty) return false;
   if (a == b) return true;
 
   final esMaxiCA = a == 'maxi c' || a.contains('maxi c');
@@ -203,79 +208,52 @@ String formatearHora(TimeOfDay time) {
   return '$h:$m hs';
 }
 
-Future<void> verificarActualizacionGitHub(BuildContext context) async {
-  if (kGitHubUser == 'TU_USUARIO_GITHUB') return;
+String resolverAliasOPrimerNombre({
+  required String nombreGoogle,
+  required String emailGoogle,
+  required String? uidGoogle,
+  required List<Jugador> plantel,
+}) {
+  final emailLimpio = emailGoogle.toLowerCase().trim();
+  final uidLimpio = uidGoogle?.trim() ?? '';
 
-  try {
-    String versionActual = kAppVersion;
-    try {
-      final info = await PackageInfo.fromPlatform();
-      if (info.version.isNotEmpty) versionActual = info.version;
-    } catch (_) {}
-
-    final response = await http.get(
-      Uri.parse('https://api.github.com/repos/$kGitHubUser/$kGitHubRepo/releases/latest'),
-      headers: {
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'FulbitoApp'
-      },
-    );
-
-    if (response.statusCode != 200) return;
-
-    final data = jsonDecode(response.body);
-    final String versionRemota =
-        (data['tag_name'] ?? '').toString().replaceAll(RegExp(r'^[vV]'), '').trim();
-
-    if (_esVersionMayor(versionRemota, versionActual) && context.mounted) {
-      String urlDescarga = data['html_url'] ?? '';
-      final List assets = data['assets'] ?? [];
-      for (var asset in assets) {
-        final String nombreArchivo = asset['name']?.toString().toLowerCase() ?? '';
-        if (nombreArchivo.endsWith('.apk')) {
-          urlDescarga = asset['browser_download_url'] ?? urlDescarga;
-          break;
-        }
+  // 1. Alias asignado en el plantel de Firestore (coincidencia por correo o UID)
+  for (var j in plantel) {
+    final jEmail = j.email.toLowerCase().trim();
+    final jUid = j.uid.trim();
+    final matchEmail = jEmail.isNotEmpty && jEmail == emailLimpio;
+    final matchUid = jUid.isNotEmpty && uidLimpio.isNotEmpty && jUid == uidLimpio;
+    if (matchEmail || matchUid) {
+      if (j.nombre.trim().isNotEmpty) {
+        return j.nombre.trim();
       }
-
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Row(
-            children: [
-              Icon(Icons.system_update, color: Colors.tealAccent),
-              SizedBox(width: 8),
-              Text('Actualización disponible', style: TextStyle(fontSize: 18)),
-            ],
-          ),
-          content: Text(
-            'Hay una nueva versión ($versionRemota) de S.V.F.C.\nTu versión instalada: $versionActual.\n\n¿Querés descargar e instalar la nueva versión ahora?',
-            style: const TextStyle(height: 1.4),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Más tarde', style: TextStyle(color: Colors.grey)),
-            ),
-            FilledButton.icon(
-              icon: const Icon(Icons.download, size: 18),
-              onPressed: () async {
-                final uri = Uri.parse(urlDescarga);
-                if (await canLaunchUrl(uri)) {
-                  await launchUrl(uri, mode: LaunchMode.externalApplication);
-                }
-              },
-              label: const Text('Actualizar ahora'),
-            ),
-          ],
-        ),
-      );
     }
-  } catch (e) {
-    debugPrint("Error al verificar actualización en GitHub: $e");
   }
+
+  for (var j in plantel) {
+    if (j.nombre.trim().isNotEmpty && sonElMismoJugador(j.nombre, nombreGoogle)) {
+      return j.nombre.trim();
+    }
+  }
+
+  // 2. Únicamente el primer nombre de la cuenta de Google
+  final limpio = limpiarNombre(nombreGoogle);
+  if (limpio.isNotEmpty) {
+    final primer = limpio.split(RegExp(r'\s+')).first.trim();
+    if (primer.isNotEmpty) {
+      return primer;
+    }
+  }
+
+  // 3. Prefijo del correo antes del @ con primera letra mayúscula
+  if (emailLimpio.isNotEmpty && emailLimpio.contains('@')) {
+    final pre = emailLimpio.split('@').first.trim();
+    if (pre.isNotEmpty) {
+      return pre[0].toUpperCase() + (pre.length > 1 ? pre.substring(1).toLowerCase() : '');
+    }
+  }
+
+  return 'Jugador';
 }
 
 bool _esVersionMayor(String nueva, String actual) {
@@ -290,8 +268,211 @@ bool _esVersionMayor(String nueva, String actual) {
   return false;
 }
 
+// ============================================================================
+// VERIFICACIÓN Y ACTUALIZACIÓN OTA NATIVA
+// ============================================================================
+Future<void> verificarActualizacionGitHub(BuildContext context) async {
+  if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+  if (kGitHubUser == 'TU_USUARIO_GITHUB') return;
+
+  try {
+    final response = await http.get(
+      Uri.parse('https://api.github.com/repos/$kGitHubUser/$kGitHubRepo/releases/latest'),
+      headers: {
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'FulbitoApp'
+      },
+    );
+
+    if (response.statusCode != 200) return;
+
+    final data = jsonDecode(response.body);
+    final String versionRemota =
+        (data['tag_name'] ?? '').toString().replaceAll(RegExp(r'^[vV]'), '').trim();
+
+    if (_esVersionMayor(versionRemota, gAppVersion) && context.mounted) {
+      String urlDescarga = '';
+      final List assets = data['assets'] ?? [];
+      for (var asset in assets) {
+        final String nombreArchivo = asset['name']?.toString().toLowerCase() ?? '';
+        if (nombreArchivo.endsWith('.apk')) {
+          urlDescarga = asset['browser_download_url'] ?? '';
+          break;
+        }
+      }
+
+      if (urlDescarga.isNotEmpty) {
+        _mostrarDialogoDescargaEInstalacion(context, versionRemota, gAppVersion, urlDescarga);
+      }
+    }
+  } catch (e) {
+    debugPrint("Error al verificar actualización en GitHub: $e");
+  }
+}
+
+void _mostrarDialogoDescargaEInstalacion(
+  BuildContext context,
+  String versionRemota,
+  String versionActual,
+  String urlDescarga,
+) {
+  bool descargando = false;
+  double progreso = 0.0;
+  String estadoTexto = '';
+  String? errorTexto;
+
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => StatefulBuilder(
+      builder: (dialogContext, setDialogState) {
+        void iniciarDescarga() {
+          setDialogState(() {
+            descargando = true;
+            progreso = 0.0;
+            estadoTexto = 'Iniciando descarga...';
+            errorTexto = null;
+          });
+
+          try {
+            OtaUpdate()
+                .execute(urlDescarga, destinationFilename: 'fulbito.apk')
+                .listen(
+              (OtaEvent event) {
+                setDialogState(() {
+                  switch (event.status) {
+                    case OtaStatus.DOWNLOADING:
+                      final valor = double.tryParse(event.value ?? '0') ?? 0.0;
+                      progreso = (valor / 100.0).clamp(0.0, 1.0);
+                      estadoTexto = 'Descargando: ${event.value}%';
+                      break;
+                    case OtaStatus.INSTALLING:
+                      progreso = 1.0;
+                      estadoTexto = 'Descarga completa. Abriendo instalador...';
+                      break;
+                    case OtaStatus.ALREADY_RUNNING_ERROR:
+                      errorTexto = 'Ya hay una descarga en proceso.';
+                      descargando = false;
+                      break;
+                    case OtaStatus.PERMISSION_NOT_GRANTED_ERROR:
+                      errorTexto =
+                          'Permiso denegado. Habilitá "Instalar aplicaciones desconocidas" en los ajustes de Fulbito.';
+                      descargando = false;
+                      break;
+                    default:
+                      errorTexto = 'No se pudo completar la descarga (${event.status}).';
+                      descargando = false;
+                      break;
+                  }
+                });
+              },
+              onError: (e) {
+                setDialogState(() {
+                  errorTexto = 'Error al descargar: $e';
+                  descargando = false;
+                });
+              },
+            );
+          } catch (e) {
+            setDialogState(() {
+              errorTexto = 'Fallo al iniciar el instalador: $e';
+              descargando = false;
+            });
+          }
+        }
+
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.system_update, color: Colors.tealAccent),
+              SizedBox(width: 8),
+              Text('Actualización disponible', style: TextStyle(fontSize: 18)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (!descargando) ...[
+                Text(
+                  'Hay una nueva versión ($versionRemota) de Fulbito.\nTu versión instalada: $versionActual.\n\n¿Deseás descargar e instalar la actualización ahora?',
+                  style: const TextStyle(height: 1.4),
+                ),
+                if (errorTexto != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.redAccent),
+                    ),
+                    child: Text(
+                      errorTexto!,
+                      style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+                    ),
+                  ),
+                ],
+              ] else ...[
+                Text(
+                  'Descargando versión $versionRemota...',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 16),
+                LinearProgressIndicator(
+                  value: progreso > 0 ? progreso : null,
+                  minHeight: 8,
+                  borderRadius: BorderRadius.circular(4),
+                  backgroundColor: Colors.white12,
+                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.tealAccent),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  estadoTexto,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 13, color: Colors.tealAccent),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Al finalizar, el sistema abrirá la ventana para confirmar la actualización.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 11, color: Colors.grey),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            if (!descargando) ...[
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Más tarde', style: TextStyle(color: Colors.grey)),
+              ),
+              FilledButton.icon(
+                icon: const Icon(Icons.download, size: 18),
+                onPressed: iniciarDescarga,
+                label: const Text('Actualizar ahora'),
+              ),
+            ],
+          ],
+        );
+      },
+    ),
+  );
+}
+
+// ============================================================================
+// MAIN Y ARRANQUE
+// ============================================================================
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  try {
+    final info = await PackageInfo.fromPlatform();
+    if (info.version.isNotEmpty) {
+      gAppVersion = info.version;
+    }
+  } catch (_) {}
 
   try {
     if (kIsWeb) {
@@ -322,7 +503,7 @@ class FulbitoApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'S.V.F.C. App',
+      title: 'Fulbito',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -362,9 +543,15 @@ class _AuthGateState extends State<AuthGate> {
 
       final user = cred.user;
       if (user != null) {
+        String nombreGuardar = limpiarNombre(user.displayName);
+        if (nombreGuardar.isEmpty && user.email != null && user.email!.contains('@')) {
+          final pre = user.email!.split('@').first.trim();
+          nombreGuardar = pre[0].toUpperCase() + (pre.length > 1 ? pre.substring(1).toLowerCase() : '');
+        }
+
         await FirebaseFirestore.instance.collection('usuarios').doc(user.uid).set({
           'uid': user.uid,
-          'nombre': limpiarNombre(user.displayName),
+          'nombre': nombreGuardar.isNotEmpty ? nombreGuardar : 'Jugador',
           'email': user.email ?? '',
           'fotoUrl': user.photoURL,
           'ultimoAcceso': FieldValue.serverTimestamp(),
@@ -446,13 +633,13 @@ class LoginScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
               const Text(
-                'S.V.F.C.',
+                'Fulbito',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 2.0),
               ),
               const SizedBox(height: 8),
               Text(
-                'Gestión de partidos, prioridades de rotación y camisetas.',
+                'S.V.F.C. - Gestión de partidos, rotación y vestuario.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 15, color: Colors.grey[400], height: 1.4),
               ),
@@ -477,7 +664,7 @@ class LoginScreen extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               Text(
-                'Versión $kAppVersion',
+                'Versión $gAppVersion',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 12, color: Colors.grey[600]),
               ),
@@ -490,7 +677,312 @@ class LoginScreen extends StatelessWidget {
   }
 }
 
-/// Pantalla Principal
+// ============================================================================
+// VESTUARIO (CHAT TEMPORAL 24 HORAS EN DOCUMENTO ÚNICO)
+// ============================================================================
+class VestuarioScreen extends StatefulWidget {
+  final String aliasUsuario;
+  const VestuarioScreen({super.key, required this.aliasUsuario});
+
+  @override
+  State<VestuarioScreen> createState() => _VestuarioScreenState();
+}
+
+class _VestuarioScreenState extends State<VestuarioScreen> {
+  final TextEditingController _ctrl = TextEditingController();
+  final ScrollController _scroll = ScrollController();
+  bool _enviando = false;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _enviarMensaje() async {
+    final txt = _ctrl.text.trim();
+    if (txt.isEmpty || _enviando) return;
+    setState(() => _enviando = true);
+    _ctrl.clear();
+
+    try {
+      final ahora = DateTime.now().millisecondsSinceEpoch;
+      final limite24hs = DateTime.now().subtract(const Duration(hours: 24)).millisecondsSinceEpoch;
+
+      final docRef = FirebaseFirestore.instance.collection('partidos').doc('actual_chat');
+      final doc = await docRef.get();
+      final List<dynamic> actuales = doc.exists ? (doc.data()?['mensajes'] as List<dynamic>? ?? []) : [];
+
+      List> filtrados = [];
+      for (var m in actuales) {
+        if (m is Map) {
+          final ts = m['ts'];
+          if (ts is int && ts > limite24hs) {
+            filtrados.add(Map<String, dynamic>.from(m));
+          }
+        }
+      }
+
+      filtrados.add({
+        'autor': widget.aliasUsuario,
+        'texto': txt,
+        'ts': ahora,
+      });
+
+      if (filtrados.length > 40) {
+        filtrados = filtrados.sublist(filtrados.length - 40);
+      }
+
+      await docRef.set({
+        'mensajes': filtrados,
+      }, SetOptions(merge: true));
+
+      _scrollHaciaAbajo();
+    } catch (e) {
+      debugPrint("Error al enviar mensaje en vestuario: $e");
+    } finally {
+      if (mounted) setState(() => _enviando = false);
+    }
+  }
+
+  void _scrollHaciaAbajo() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scroll.hasClients) {
+        _scroll.animateTo(
+          _scroll.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF16253B),
+            border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.05))),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.tealAccent.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.forum_outlined, color: Colors.tealAccent, size: 20),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Vestuario',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                    Text(
+                      'Los mensajes se borran solos a las 24 horas (máx. 40).',
+                      style: TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: StreamBuilder<DocumentSnapshot>(
+            stream: FirebaseFirestore.instance.collection('partidos').doc('actual_chat').snapshots(),
+            builder: (ctx, snap) {
+              if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              final data = snap.data?.data() as Map<String, dynamic>? ?? {};
+              final limite24hs = DateTime.now().subtract(const Duration(hours: 24)).millisecondsSinceEpoch;
+              final rawMensajes = (data['mensajes'] as List<dynamic>? ?? []);
+
+              final List> mensajes = [];
+              for (var m in rawMensajes) {
+                if (m is Map) {
+                  final ts = m['ts'];
+                  if (ts is int && ts > limite24hs) {
+                    mensajes.add(Map<String, dynamic>.from(m));
+                  }
+                }
+              }
+
+              if (mensajes.isEmpty) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.mark_chat_unread_outlined, size: 48, color: Colors.grey.shade600),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'El vestuario está tranquilo',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white70),
+                        ),
+                        const SizedBox(height: 6),
+                        const Text(
+                          'No hay mensajes en las últimas 24 horas.\n¡Escribí el primero para encender la charla!',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (_scroll.hasClients) {
+                  _scroll.jumpTo(_scroll.position.maxScrollExtent);
+                }
+              });
+
+              return ListView.builder(
+                controller: _scroll,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                itemCount: mensajes.length,
+                itemBuilder: (c, i) {
+                  final m = mensajes[i];
+                  final autor = m['autor']?.toString() ?? 'Jugador';
+                  final texto = m['texto']?.toString() ?? '';
+                  final ts = m['ts'] as int?;
+                  final esMio = sonElMismoJugador(autor, widget.aliasUsuario);
+
+                  String horaFormateada = '';
+                  if (ts != null) {
+                    final dt = DateTime.fromMillisecondsSinceEpoch(ts);
+                    horaFormateada = '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+                  }
+
+                  return Align(
+                    alignment: esMio ? Alignment.centerRight : Alignment.centerLeft,
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+                      decoration: BoxDecoration(
+                        color: esMio ? const Color(0xFF0F5132) : const Color(0xFF16253B),
+                        borderRadius: BorderRadius.only(
+                          topLeft: const Radius.circular(14),
+                          topRight: const Radius.circular(14),
+                          bottomLeft: Radius.circular(esMio ? 14 : 2),
+                          bottomRight: Radius.circular(esMio ? 2 : 14),
+                        ),
+                        border: Border.all(
+                          color: esMio ? Colors.tealAccent.withValues(alpha: 0.3) : Colors.white10,
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (!esMio)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 2),
+                              child: Text(
+                                autor,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.tealAccent,
+                                ),
+                              ),
+                            ),
+                          Text(
+                            texto,
+                            style: const TextStyle(fontSize: 14, color: Colors.white, height: 1.3),
+                          ),
+                          if (horaFormateada.isNotEmpty)
+                            Align(
+                              alignment: Alignment.bottomRight,
+                              child: Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(
+                                  horaFormateada,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: esMio ? Colors.tealAccent.withValues(alpha: 0.7) : Colors.grey,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        SafeArea(
+          top: false,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF101C2B),
+              border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _ctrl,
+                    textCapitalization: TextCapitalization.sentences,
+                    onSubmitted: (_) => _enviarMensaje(),
+                    decoration: InputDecoration(
+                      hintText: 'Mensaje al vestuario...',
+                      hintStyle: const TextStyle(fontSize: 14, color: Colors.grey),
+                      filled: true,
+                      fillColor: Colors.white.withValues(alpha: 0.05),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide.none,
+                      ),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filled(
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.tealAccent,
+                    foregroundColor: Colors.black,
+                  ),
+                  icon: _enviando
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                        )
+                      : const Icon(Icons.send, size: 18),
+                  onPressed: _enviando ? null : _enviarMensaje,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ============================================================================
+// PANTALLA PRINCIPAL
+// ============================================================================
 class PantallaPrincipal extends StatefulWidget {
   final String nombreJugador;
   final String emailJugador;
@@ -511,35 +1003,16 @@ class PantallaPrincipal extends StatefulWidget {
 
 class _PantallaPrincipalState extends State<PantallaPrincipal> {
   int _indiceActual = 0;
-  String _versionDinamica = kAppVersion;
-  StreamSubscription? _subAlertasBaja;
   String? _ultimoRecordatorioProgramado;
   bool _verificandoSemana = false;
-  final DateTime _horaInicioApp = DateTime.now();
+  DateTime? _ultimaAlertaNotificada;
 
   @override
   void initState() {
     super.initState();
-    _cargarVersionReal();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       verificarActualizacionGitHub(context);
     });
-    _escucharAlertasAdmin();
-  }
-
-  @override
-  void dispose() {
-    _subAlertasBaja?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _cargarVersionReal() async {
-    try {
-      final info = await PackageInfo.fromPlatform();
-      if (mounted && info.version.isNotEmpty) {
-        setState(() => _versionDinamica = info.version);
-      }
-    } catch (_) {}
   }
 
   bool get _esAdmin =>
@@ -548,41 +1021,6 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
   String? get _fotoUrlConProxy {
     if (widget.fotoUrl == null || widget.fotoUrl!.isEmpty) return null;
     return 'https://images.weserv.nl/?url=${Uri.encodeComponent(widget.fotoUrl!)}';
-  }
-
-  void _escucharAlertasAdmin() {
-    if (!_esAdmin) return;
-    _subAlertasBaja = FirebaseFirestore.instance
-        .collection('partidos')
-        .doc('actual')
-        .collection('alertas')
-        .where('tipo', isEqualTo: 'baja')
-        .orderBy('timestamp', descending: true)
-        .limit(1)
-        .snapshots()
-        .listen((snap) {
-      if (snap.docChanges.isNotEmpty) {
-        for (var change in snap.docChanges) {
-          if (change.type == DocumentChangeType.added) {
-            final data = change.doc.data();
-            if (data != null && data['nombre'] != null) {
-              final timestamp = (data['timestamp'] as Timestamp?)?.toDate();
-              final nombreBaja = data['nombre'].toString();
-
-              if (timestamp != null &&
-                  timestamp.isAfter(_horaInicioApp) &&
-                  !sonElMismoJugador(nombreBaja, widget.nombreJugador)) {
-                mostrarNotificacion(
-                  id: 101,
-                  titulo: '⚠️ Jugador dado de baja',
-                  cuerpo: '$nombreBaja avisó que no juega este partido.',
-                );
-              }
-            }
-          }
-        }
-      }
-    });
   }
 
   void _revisarProgramacionRecordatorio(Map<String, dynamic> datosPartido) {
@@ -599,25 +1037,6 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
     }
   }
 
-  /// Limpia las colecciones de convocados y alertas del partido actual
-  Future<void> _ejecutarResetConvocatoria() async {
-    final db = FirebaseFirestore.instance;
-    final batch = db.batch();
-
-    final convSnap = await db.collection('partidos').doc('actual').collection('convocados').get();
-    for (var doc in convSnap.docs) {
-      batch.delete(doc.reference);
-    }
-
-    final alertSnap = await db.collection('partidos').doc('actual').collection('alertas').get();
-    for (var doc in alertSnap.docs) {
-      batch.delete(doc.reference);
-    }
-
-    await batch.commit();
-  }
-
-  /// Revisa si el partido ya pasó (a partir de las 00:00 hs del día siguiente) y corre la fecha 7 días
   void _verificarYActualizarSemanaPartido(Map<String, dynamic> datosPartido) async {
     if (_verificandoSemana) return;
 
@@ -645,9 +1064,9 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
         await FirebaseFirestore.instance.collection('partidos').doc('actual').set({
           'dia': nuevoDiaTexto,
           'fechaMillis': nuevaFecha.millisecondsSinceEpoch,
+          'asistencia': FieldValue.delete(),
+          'ultimaAlerta': FieldValue.delete(),
         }, SetOptions(merge: true));
-
-        await _ejecutarResetConvocatoria();
       } catch (e) {
         debugPrint('Error al actualizar fecha semanal del partido: $e');
       } finally {
@@ -668,7 +1087,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
           ],
         ),
         content: const Text(
-          'Esta acción borrará todas las confirmaciones y bajas actuales. Todos los jugadores volverán a quedar "Sin responder".\n\n¿Deseas continuar?',
+          'Esta acción borrará todas las confirmaciones y bajas actuales. Todos los jugadores volverán a quedar "Sin responder".\n\n¿Deseás continuar?',
           style: TextStyle(height: 1.4),
         ),
         actions: [
@@ -680,7 +1099,10 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
             style: FilledButton.styleFrom(backgroundColor: Colors.amber.shade900),
             onPressed: () async {
               Navigator.pop(ctx);
-              await _ejecutarResetConvocatoria();
+              await FirebaseFirestore.instance.collection('partidos').doc('actual').update({
+                'asistencia': FieldValue.delete(),
+                'ultimaAlerta': FieldValue.delete(),
+              });
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
@@ -923,15 +1345,39 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
             }
 
             final todos = [...titulares, ...suplentes];
+            final String aliasUsuario = resolverAliasOPrimerNombre(
+              nombreGoogle: widget.nombreJugador,
+              emailGoogle: widget.emailJugador,
+              uidGoogle: FirebaseAuth.instance.currentUser?.uid,
+              plantel: todos,
+            );
+
+            // Notificación de baja para administradores
+            if (_esAdmin && infoPartido['ultimaAlerta'] != null) {
+              final alerta = infoPartido['ultimaAlerta'];
+              final ts = (alerta['timestamp'] as Timestamp?)?.toDate();
+              if (ts != null && (_ultimaAlertaNotificada == null || ts.isAfter(_ultimaAlertaNotificada!))) {
+                _ultimaAlertaNotificada = ts;
+                if (ts.isAfter(DateTime.now().subtract(const Duration(minutes: 5))) &&
+                    !sonElMismoJugador(alerta['nombre'] ?? '', aliasUsuario)) {
+                  mostrarNotificacion(
+                    id: 101,
+                    titulo: '⚠️ Jugador dado de baja',
+                    cuerpo: '${alerta['nombre']} avisó que no juega este partido.',
+                  );
+                }
+              }
+            }
+
             final bool esModerador = _esAdmin ||
                 todos.any((j) =>
                     j.esModerador &&
                     (j.email.toLowerCase().trim() == widget.emailJugador.toLowerCase().trim() ||
-                        sonElMismoJugador(j.nombre, widget.nombreJugador)));
+                        sonElMismoJugador(j.nombre, aliasUsuario)));
 
             final List<Widget> pantallas = [
               ConvocatoriaScreen(
-                nombreJugador: widget.nombreJugador,
+                nombreJugador: aliasUsuario,
                 emailJugador: widget.emailJugador,
                 infoPartido: infoPartido,
                 esAdmin: _esAdmin,
@@ -941,7 +1387,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
               TablaScreen(
                 esAdmin: _esAdmin,
                 puedeCargarResultado: _esAdmin || esModerador,
-                nombreJugador: widget.nombreJugador,
+                nombreJugador: aliasUsuario,
                 titulares: titulares,
               ),
               RotacionScreen(
@@ -949,6 +1395,9 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                 titulares: titulares,
                 suplentes: suplentes,
                 onAbrirGestionPlantel: () => _abrirGestionPlantel(context),
+              ),
+              VestuarioScreen(
+                aliasUsuario: aliasUsuario,
               ),
             ];
 
@@ -959,7 +1408,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                   child: CircleAvatar(
                       backgroundColor: Colors.white, backgroundImage: AssetImage('assets/logo.jpg')),
                 ),
-                title: const Text('S.V.F.C. Oficial',
+                title: const Text('Fulbito',
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                 actions: [
                   PopupMenuButton<String>(
@@ -974,9 +1423,9 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                                 height: 32,
                                 fit: BoxFit.cover,
                                 errorBuilder: (context, error, stackTrace) =>
-                                    const Icon(Icons.person, size: 20, color: Colors.white),
+                                    Text(aliasUsuario.isNotEmpty ? aliasUsuario[0].toUpperCase() : 'J'),
                               )
-                            : const Icon(Icons.person, size: 20, color: Colors.white),
+                            : Text(aliasUsuario.isNotEmpty ? aliasUsuario[0].toUpperCase() : 'J'),
                       ),
                     ),
                     onSelected: (value) {
@@ -998,7 +1447,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                           children: [
                             Row(
                               children: [
-                                Text(widget.nombreJugador,
+                                Text(aliasUsuario,
                                     style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
                                 const SizedBox(width: 6),
                                 if (_esAdmin)
@@ -1075,7 +1524,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                         height: 26,
                         child: Center(
                           child: Text(
-                            'Versión $_versionDinamica',
+                            'Versión $gAppVersion',
                             style: const TextStyle(fontSize: 11, color: Colors.grey),
                           ),
                         ),
@@ -1102,6 +1551,10 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                       icon: Icon(Icons.sync_alt_outlined),
                       selectedIcon: Icon(Icons.sync_alt),
                       label: 'Rotación'),
+                  NavigationDestination(
+                      icon: Icon(Icons.forum_outlined),
+                      selectedIcon: Icon(Icons.forum),
+                      label: 'Vestuario'),
                 ],
               ),
             );
@@ -1112,7 +1565,9 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
   }
 }
 
-/// Pantalla para gestionar el Plantel (Directo a Firestore)
+// ============================================================================
+// GESTIÓN DE PLANTEL
+// ============================================================================
 class GestionPlantelScreen extends StatefulWidget {
   const GestionPlantelScreen({super.key});
 
@@ -1587,7 +2042,9 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
   }
 }
 
-/// Convocatoria
+// ============================================================================
+// CONVOCATORIA SCREEN
+// ============================================================================
 class ConvocatoriaScreen extends StatefulWidget {
   final String nombreJugador;
   final String emailJugador;
@@ -1612,47 +2069,17 @@ class ConvocatoriaScreen extends StatefulWidget {
 
 class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-  final String? _uid = FirebaseAuth.instance.currentUser?.uid;
-
-  bool? _jugabaEnUltimoCalculo;
-  bool _alertaCompletadoDisparada = false;
-
-  String get _nombreOficialPlantel {
-    for (var t in widget.titulares) {
-      if ((t.email == widget.emailJugador && widget.emailJugador.isNotEmpty) ||
-          (t.uid.isNotEmpty && t.uid == _uid)) {
-        return t.nombre;
-      }
-    }
-    for (var s in widget.suplentes) {
-      if ((s.email == widget.emailJugador && widget.emailJugador.isNotEmpty) ||
-          (s.uid.isNotEmpty && s.uid == _uid)) {
-        return s.nombre;
-      }
-    }
-    for (var t in widget.titulares) {
-      if (sonElMismoJugador(t.nombre, widget.nombreJugador)) return t.nombre;
-    }
-    return widget.nombreJugador;
-  }
 
   Future<void> _cambiarEstadoJugador(Jugador j, String nuevoEstado) async {
-    final docId = j.uid.isNotEmpty ? j.uid : 'jugador_${_normalizar(j.nombre)}';
-    await _db.collection('partidos').doc('actual').collection('convocados').doc(docId).set({
-      'uid': docId,
-      'nombre': j.nombre,
-      'email': j.email,
-      'estado': nuevoEstado,
-      'fechaActualizacion': FieldValue.serverTimestamp(),
+    await _db.collection('partidos').doc('actual').set({
+      'asistencia': {j.nombre: nuevoEstado},
+      if (nuevoEstado == 'baja')
+        'ultimaAlerta': {
+          'tipo': 'baja',
+          'nombre': j.nombre,
+          'timestamp': FieldValue.serverTimestamp(),
+        },
     }, SetOptions(merge: true));
-
-    if (nuevoEstado == 'baja') {
-      await _db.collection('partidos').doc('actual').collection('alertas').add({
-        'tipo': 'baja',
-        'nombre': j.nombre,
-        'timestamp': FieldValue.serverTimestamp(),
-      });
-    }
   }
 
   Widget _buildBotonAdmin(Jugador j, String estadoActual) {
@@ -1676,545 +2103,485 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
     );
   }
 
+  String _obtenerEstadoDeMapa(String nombre, Map<String, dynamic> asistencia) {
+    for (var k in asistencia.keys) {
+      if (sonElMismoJugador(k, nombre)) {
+        return asistencia[k]?.toString() ?? 'pendiente';
+      }
+    }
+    return 'pendiente';
+  }
+
   @override
   Widget build(BuildContext context) {
     final dia = widget.infoPartido['dia'] ?? 'Viernes 30 de Octubre';
     final hora = widget.infoPartido['hora'] ?? '20:00 hs';
     final lugar = widget.infoPartido['lugar'] ?? 'Estación 98 - Cancha 2';
     final int cupoMaximo = widget.infoPartido['cupoMaximo'] ?? 10;
+    final Map<String, dynamic> asistencia =
+        (widget.infoPartido['asistencia'] as Map<String, dynamic>?) ?? {};
 
-    return StreamBuilder<QuerySnapshot>(
-      stream: _db.collection('partidos').doc('actual').collection('convocados').snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
+    final List<Jugador> prioritarios = widget.titulares.take(cupoMaximo).toList();
+    final List<Jugador> colaEspera = [
+      ...widget.titulares.skip(cupoMaximo),
+      ...widget.suplentes,
+    ];
 
-        final docs = snapshot.data?.docs ?? [];
-        final Map<String, String> estadosPorNombre = {};
+    final List<Jugador> prioritariosConfirmados = [];
+    final List<Jugador> prioritariosPendientes = [];
+    final List<Jugador> prioritariosBajas = [];
 
-        for (var doc in docs) {
-          final data = doc.data() as Map<String, dynamic>;
-          final n = limpiarNombre(data['nombre']?.toString());
-          final st = (data['estado'] ?? 'pendiente').toString();
-          estadosPorNombre[n] = st;
-        }
+    for (var j in prioritarios) {
+      String estado = _obtenerEstadoDeMapa(j.nombre, asistencia);
+      if (estado == 'confirmado') {
+        prioritariosConfirmados.add(j);
+      } else if (estado == 'baja') {
+        prioritariosBajas.add(j);
+      } else {
+        prioritariosPendientes.add(j);
+      }
+    }
 
-        final List<Jugador> prioritarios = widget.titulares.take(cupoMaximo).toList();
-        final List<Jugador> colaEspera = [
-          ...widget.titulares.skip(cupoMaximo),
-          ...widget.suplentes,
-        ];
+    int cuposLiberadosParaCola =
+        cupoMaximo - prioritariosConfirmados.length - prioritariosPendientes.length;
+    if (cuposLiberadosParaCola < 0) cuposLiberadosParaCola = 0;
 
-        final List<Jugador> prioritariosConfirmados = [];
-        final List<Jugador> prioritariosPendientes = [];
-        final List<Jugador> prioritariosBajas = [];
+    final List<Jugador> colaConfirmados = [];
+    final List<Jugador> colaPendientes = [];
+    final List<Jugador> colaBajas = [];
 
-        for (var j in prioritarios) {
-          String estado = 'pendiente';
-          for (var entry in estadosPorNombre.entries) {
-            if (sonElMismoJugador(entry.key, j.nombre)) {
-              estado = entry.value;
-              break;
-            }
-          }
-          if (estado == 'confirmado') {
-            prioritariosConfirmados.add(j);
-          } else if (estado == 'baja') {
-            prioritariosBajas.add(j);
-          } else {
-            prioritariosPendientes.add(j);
-          }
-        }
+    for (var j in colaEspera) {
+      String estado = _obtenerEstadoDeMapa(j.nombre, asistencia);
+      if (estado == 'confirmado') {
+        colaConfirmados.add(j);
+      } else if (estado == 'baja') {
+        colaBajas.add(j);
+      } else {
+        colaPendientes.add(j);
+      }
+    }
 
-        int cuposLiberadosParaCola =
-            cupoMaximo - prioritariosConfirmados.length - prioritariosPendientes.length;
-        if (cuposLiberadosParaCola < 0) cuposLiberadosParaCola = 0;
+    final List<Jugador> ascendidosDeCola = colaConfirmados.take(cuposLiberadosParaCola).toList();
+    final List<Jugador> enEsperaConfirmados = colaConfirmados.skip(cuposLiberadosParaCola).toList();
 
-        final List<Jugador> colaConfirmados = [];
-        final List<Jugador> colaPendientes = [];
-        final List<Jugador> colaBajas = [];
+    final List<Jugador> titularesConfirmados = [
+      ...prioritariosConfirmados,
+      ...ascendidosDeCola,
+    ];
 
-        for (var j in colaEspera) {
-          String estado = 'pendiente';
-          for (var entry in estadosPorNombre.entries) {
-            if (sonElMismoJugador(entry.key, j.nombre)) {
-              estado = entry.value;
-              break;
-            }
-          }
-          if (estado == 'confirmado') {
-            colaConfirmados.add(j);
-          } else if (estado == 'baja') {
-            colaBajas.add(j);
-          } else {
-            colaPendientes.add(j);
-          }
-        }
+    final List<Jugador> bajas = [...prioritariosBajas, ...colaBajas];
+    final List<Jugador> pendientes = [...prioritariosPendientes, ...colaPendientes];
 
-        final List<Jugador> ascendidosDeCola = colaConfirmados.take(cuposLiberadosParaCola).toList();
-        final List<Jugador> enEsperaConfirmados = colaConfirmados.skip(cuposLiberadosParaCola).toList();
+    final String miEstado = _obtenerEstadoDeMapa(widget.nombreJugador, asistencia);
+    final int totalTitulares = titularesConfirmados.length;
+    final jugadorActualObj = Jugador(nombre: widget.nombreJugador, email: widget.emailJugador);
 
-        final List<Jugador> titularesConfirmados = [
-          ...prioritariosConfirmados,
-          ...ascendidosDeCola,
-        ];
-
-        final List<Jugador> bajas = [...prioritariosBajas, ...colaBajas];
-        final List<Jugador> pendientes = [...prioritariosPendientes, ...colaPendientes];
-
-        String miEstado = 'pendiente';
-        for (var entry in estadosPorNombre.entries) {
-          if (sonElMismoJugador(entry.key, _nombreOficialPlantel)) {
-            miEstado = entry.value;
-            break;
-          }
-        }
-
-        final int totalTitulares = titularesConfirmados.length;
-        final jugadorActualObj =
-            Jugador(nombre: _nombreOficialPlantel, email: widget.emailJugador, uid: _uid ?? '');
-
-        final bool juegoAhora =
-            titularesConfirmados.any((j) => sonElMismoJugador(j.nombre, _nombreOficialPlantel));
-
-        if (_jugabaEnUltimoCalculo != null) {
-          if (!_jugabaEnUltimoCalculo! && juegoAhora) {
-            mostrarNotificacion(
-              id: 102,
-              titulo: '⚽ ¡Entraste al equipo!',
-              cuerpo: 'Se liberó un cupo y quedaste confirmado entre los 10 titulares.',
-            );
-          } else if (_jugabaEnUltimoCalculo! && !juegoAhora && miEstado == 'confirmado') {
-            mostrarNotificacion(
-              id: 103,
-              titulo: '⏳ Pasaste a lista de espera',
-              cuerpo: 'Un titular con prioridad confirmó su asistencia.',
-            );
-          }
-        }
-        _jugabaEnUltimoCalculo = juegoAhora;
-
-        if (totalTitulares == cupoMaximo && !_alertaCompletadoDisparada) {
-          _alertaCompletadoDisparada = true;
-          if (juegoAhora) {
-            final listaNombres = titularesConfirmados.map((j) => j.nombre).join(', ');
-            mostrarNotificacion(
-              id: 104,
-              titulo: '✅ ¡Se completó el equipo!',
-              cuerpo: 'Plantel confirmado ($cupoMaximo): $listaNombres',
-            );
-          }
-        } else if (totalTitulares < cupoMaximo) {
-          _alertaCompletadoDisparada = false;
-        }
-
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Card(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                                color: Colors.lightBlueAccent.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(20)),
-                            child: Text(dia,
-                                style: const TextStyle(
-                                    color: Colors.lightBlueAccent,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12)),
-                          ),
-                          Text('Fútbol ${(cupoMaximo / 2).round()}',
-                              style: const TextStyle(color: Colors.grey, fontSize: 13)),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Text(hora, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 6),
-                      Row(
-                        children: [
-                          const Icon(Icons.location_on_outlined, size: 16, color: Colors.grey),
-                          const SizedBox(width: 4),
-                          Expanded(
-                              child: Text(lugar,
-                                  style: const TextStyle(color: Colors.grey),
-                                  overflow: TextOverflow.ellipsis)),
-                        ],
-                      ),
-                      const Divider(height: 24),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('Cupos confirmados asegurados:', style: TextStyle(fontSize: 13)),
-                          Text(
-                            '$totalTitulares / $cupoMaximo',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: totalTitulares >= cupoMaximo
-                                  ? Colors.lightBlueAccent
-                                  : Colors.orangeAccent,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      LinearProgressIndicator(
-                        value: (totalTitulares / cupoMaximo).clamp(0.0, 1.0),
-                        backgroundColor: Colors.white10,
-                        valueColor: AlwaysStoppedAnimation<Color>(totalTitulares >= cupoMaximo
-                            ? Colors.lightBlueAccent
-                            : Colors.orangeAccent),
-                        borderRadius: BorderRadius.circular(10),
-                        minHeight: 6,
-                      ),
-                      if (prioritariosPendientes.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          'Hay ${prioritariosPendientes.length} titular(es) con cupo reservado que todavía no respondieron.',
-                          style: const TextStyle(fontSize: 11, color: Colors.amberAccent),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Card(
-                color: Colors.white.withValues(alpha: 0.05),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('¿Jugás esta semana?',
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: FilledButton.icon(
-                              onPressed: () => _cambiarEstadoJugador(jugadorActualObj, 'confirmado'),
-                              style: FilledButton.styleFrom(
-                                backgroundColor:
-                                    miEstado == 'confirmado' ? const Color(0xFF1B5E20) : Colors.grey.shade800,
-                                foregroundColor: Colors.white,
-                              ),
-                              icon: const Icon(Icons.check, size: 18),
-                              label: const Text('Confirmo'),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () => _cambiarEstadoJugador(jugadorActualObj, 'baja'),
-                              style: OutlinedButton.styleFrom(
-                                  side: BorderSide(
-                                      color: miEstado == 'baja' ? Colors.redAccent : Colors.grey.shade700)),
-                              icon: Icon(Icons.close,
-                                  size: 18, color: miEstado == 'baja' ? Colors.redAccent : Colors.grey),
-                              label: Text('Me bajo',
-                                  style: TextStyle(
-                                      color: miEstado == 'baja' ? Colors.redAccent : Colors.grey)),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Text(
-                      'Titulares Confirmados ($totalTitulares / $cupoMaximo)',
-                      style: const TextStyle(
-                          fontSize: 14, fontWeight: FontWeight.bold, color: Colors.greenAccent),
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                            color: Colors.lightBlueAccent.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(20)),
+                        child: Text(dia,
+                            style: const TextStyle(
+                                color: Colors.lightBlueAccent,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12)),
+                      ),
+                      Text('Fútbol ${(cupoMaximo / 2).round()}',
+                          style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                    ],
                   ),
-                  const SizedBox(width: 6),
-                  const Text('Lugar asegurado', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                  const SizedBox(height: 12),
+                  Text(hora, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      const Icon(Icons.location_on_outlined, size: 16, color: Colors.grey),
+                      const SizedBox(width: 4),
+                      Expanded(
+                          child: Text(lugar,
+                              style: const TextStyle(color: Colors.grey),
+                              overflow: TextOverflow.ellipsis)),
+                    ],
+                  ),
+                  const Divider(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Cupos confirmados asegurados:', style: TextStyle(fontSize: 13)),
+                      Text(
+                        '$totalTitulares / $cupoMaximo',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: totalTitulares >= cupoMaximo
+                              ? Colors.lightBlueAccent
+                              : Colors.orangeAccent,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(
+                    value: (totalTitulares / cupoMaximo).clamp(0.0, 1.0),
+                    backgroundColor: Colors.white10,
+                    valueColor: AlwaysStoppedAnimation<Color>(totalTitulares >= cupoMaximo
+                        ? Colors.lightBlueAccent
+                        : Colors.orangeAccent),
+                    borderRadius: BorderRadius.circular(10),
+                    minHeight: 6,
+                  ),
+                  if (prioritariosPendientes.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Hay ${prioritariosPendientes.length} titular(es) con cupo reservado que todavía no respondieron.',
+                      style: const TextStyle(fontSize: 11, color: Colors.amberAccent),
+                    ),
+                  ],
                 ],
               ),
-              const SizedBox(height: 8),
-              if (titularesConfirmados.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8.0),
-                  child: Text('Aún no hay jugadores asegurados.', style: TextStyle(color: Colors.grey)),
-                )
-              else
-                ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: titularesConfirmados.length,
-                  itemBuilder: (context, index) {
-                    final j = titularesConfirmados[index];
-                    final esYo = sonElMismoJugador(j.nombre, _nombreOficialPlantel);
-
-                    return Card(
-                      margin: const EdgeInsets.symmetric(vertical: 4),
-                      color: esYo
-                          ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.15)
-                          : Colors.white.withValues(alpha: 0.03),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        side: esYo
-                            ? BorderSide(color: Theme.of(context).colorScheme.primary)
-                            : BorderSide.none,
-                      ),
-                      child: ListTile(
-                        dense: true,
-                        leading: CircleAvatar(
-                          radius: 14,
-                          backgroundColor: Colors.green.shade800,
-                          child: Text('${index + 1}',
-                              style: const TextStyle(
-                                  fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
-                        ),
-                        title: Row(
-                          children: [
-                            Expanded(
-                                child: Text(j.nombre,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(fontWeight: esYo ? FontWeight.bold : FontWeight.normal))),
-                            if (esYo) ...[
-                              const SizedBox(width: 6),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                    color: Colors.blueAccent, borderRadius: BorderRadius.circular(4)),
-                                child: const Text('Tú',
-                                    style: TextStyle(
-                                        fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
-                              ),
-                            ],
-                          ],
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.check_circle_outline, color: Colors.greenAccent, size: 16),
-                                SizedBox(width: 4),
-                                Text('Juega',
-                                    style: TextStyle(
-                                        color: Colors.greenAccent,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold)),
-                              ],
-                            ),
-                            _buildBotonAdmin(j, 'confirmado'),
-                          ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Card(
+            color: Colors.white.withValues(alpha: 0.05),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('¿Jugás esta semana?',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: () => _cambiarEstadoJugador(jugadorActualObj, 'confirmado'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor:
+                                miEstado == 'confirmado' ? const Color(0xFF1B5E20) : Colors.grey.shade800,
+                            foregroundColor: Colors.white,
+                          ),
+                          icon: const Icon(Icons.check, size: 18),
+                          label: const Text('Confirmo'),
                         ),
                       ),
-                    );
-                  },
-                ),
-              if (enEsperaConfirmados.isNotEmpty) ...[
-                const SizedBox(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('En Espera (Confirmaron)',
-                        style: TextStyle(
-                            fontSize: 14, fontWeight: FontWeight.bold, color: Colors.orangeAccent)),
-                    Text('${enEsperaConfirmados.length}',
-                        style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: enEsperaConfirmados.length,
-                  itemBuilder: (context, index) {
-                    final j = enEsperaConfirmados[index];
-                    final esYo = sonElMismoJugador(j.nombre, _nombreOficialPlantel);
-
-                    return Card(
-                      margin: const EdgeInsets.symmetric(vertical: 4),
-                      color: Colors.orangeAccent.withValues(alpha: 0.08),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        side: BorderSide(color: Colors.orangeAccent.withValues(alpha: 0.3)),
-                      ),
-                      child: ListTile(
-                        dense: true,
-                        leading: CircleAvatar(
-                          radius: 14,
-                          backgroundColor: Colors.orange.shade900,
-                          child: Text('${index + 1}',
-                              style: const TextStyle(
-                                  fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
-                        ),
-                        title: Row(
-                          children: [
-                            Expanded(
-                                child: Text(j.nombre, maxLines: 1, overflow: TextOverflow.ellipsis)),
-                            if (esYo) ...[
-                              const SizedBox(width: 6),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                    color: Colors.blueAccent, borderRadius: BorderRadius.circular(4)),
-                                child: const Text('Tú',
-                                    style: TextStyle(
-                                        fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
-                              ),
-                            ],
-                          ],
-                        ),
-                        subtitle: Text(
-                          prioritariosPendientes.isNotEmpty
-                              ? 'Esperando respuesta de ${prioritariosPendientes.length} titular(es) con reserva'
-                              : 'Esperando que se libere cupo por baja',
-                          style: const TextStyle(fontSize: 10, color: Colors.white60),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '${index + 1}° en cola',
-                              style: const TextStyle(
-                                  fontSize: 11, color: Colors.orangeAccent, fontWeight: FontWeight.bold),
-                            ),
-                            _buildBotonAdmin(j, 'confirmado'),
-                          ],
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => _cambiarEstadoJugador(jugadorActualObj, 'baja'),
+                          style: OutlinedButton.styleFrom(
+                              side: BorderSide(
+                                  color: miEstado == 'baja' ? Colors.redAccent : Colors.grey.shade700)),
+                          icon: Icon(Icons.close,
+                              size: 18, color: miEstado == 'baja' ? Colors.redAccent : Colors.grey),
+                          label: Text('Me bajo',
+                              style: TextStyle(
+                                  color: miEstado == 'baja' ? Colors.redAccent : Colors.grey)),
                         ),
                       ),
-                    );
-                  },
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Titulares Confirmados ($totalTitulares / $cupoMaximo)',
+                  style: const TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.bold, color: Colors.greenAccent),
+                  overflow: TextOverflow.ellipsis,
                 ),
-              ],
-              if (pendientes.isNotEmpty) ...[
-                const SizedBox(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Sin Responder / Pendientes',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)),
-                    Text('${pendientes.length}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: pendientes.length,
-                  itemBuilder: (context, index) {
-                    final j = pendientes[index];
-                    final bool esTitularPrioritario =
-                        prioritarios.any((p) => sonElMismoJugador(p.nombre, j.nombre));
-                    final bool esTitularEnRiesgo = !esTitularPrioritario &&
-                        widget.titulares.skip(cupoMaximo).any((t) => sonElMismoJugador(t.nombre, j.nombre));
-
-                    String subtitulo;
-                    Color colorSubtitulo;
-                    IconData icono;
-
-                    if (esTitularPrioritario) {
-                      subtitulo = 'Cupo reservado por rotación';
-                      colorSubtitulo = Colors.amberAccent;
-                      icono = Icons.shield_outlined;
-                    } else if (esTitularEnRiesgo) {
-                      subtitulo = 'Cupo sujeto a disponibilidad por rotación';
-                      colorSubtitulo = Colors.orangeAccent;
-                      icono = Icons.swap_vert;
-                    } else {
-                      subtitulo = 'Cupo sujeto a disponibilidad por suplencia';
-                      colorSubtitulo = Colors.grey;
-                      icono = Icons.person_outline;
-                    }
-
-                    return Card(
-                      margin: const EdgeInsets.symmetric(vertical: 2),
-                      color: Colors.white.withValues(alpha: 0.02),
-                      child: ListTile(
-                        dense: true,
-                        leading: Icon(
-                          icono,
-                          size: 18,
-                          color: colorSubtitulo,
-                        ),
-                        title: Text(j.nombre, style: const TextStyle(color: Colors.white70)),
-                        subtitle: Text(
-                          subtitulo,
-                          style: TextStyle(fontSize: 10, color: colorSubtitulo),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text('Sin responder', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                            _buildBotonAdmin(j, 'pendiente'),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ],
-              if (bajas.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                Text('No juegan (${bajas.length})',
-                    style:
-                        const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)),
-                const SizedBox(height: 8),
-                ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: bajas.length,
-                  itemBuilder: (context, index) {
-                    final j = bajas[index];
-                    return Card(
-                      color: Colors.white.withValues(alpha: 0.03),
-                      margin: const EdgeInsets.symmetric(vertical: 2),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      child: ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.person_off_outlined, color: Colors.grey, size: 18),
-                        title: Text(j.nombre, style: const TextStyle(color: Colors.grey)),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text('Baja',
-                                style: TextStyle(
-                                    color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.w600)),
-                            _buildBotonAdmin(j, 'baja'),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ],
-              const SizedBox(height: 24),
+              ),
+              const SizedBox(width: 6),
+              const Text('Lugar asegurado', style: TextStyle(fontSize: 11, color: Colors.grey)),
             ],
           ),
-        );
-      },
+          const SizedBox(height: 8),
+          if (titularesConfirmados.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8.0),
+              child: Text('Aún no hay jugadores asegurados.', style: TextStyle(color: Colors.grey)),
+            )
+          else
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: titularesConfirmados.length,
+              itemBuilder: (context, index) {
+                final j = titularesConfirmados[index];
+                final esYo = sonElMismoJugador(j.nombre, widget.nombreJugador);
+
+                return Card(
+                  margin: const EdgeInsets.symmetric(vertical: 4),
+                  color: esYo
+                      ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.15)
+                      : Colors.white.withValues(alpha: 0.03),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    side: esYo
+                        ? BorderSide(color: Theme.of(context).colorScheme.primary)
+                        : BorderSide.none,
+                  ),
+                  child: ListTile(
+                    dense: true,
+                    leading: CircleAvatar(
+                      radius: 14,
+                      backgroundColor: Colors.green.shade800,
+                      child: Text('${index + 1}',
+                          style: const TextStyle(
+                              fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+                    ),
+                    title: Row(
+                      children: [
+                        Expanded(
+                            child: Text(j.nombre,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontWeight: esYo ? FontWeight.bold : FontWeight.normal))),
+                        if (esYo) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                                color: Colors.blueAccent, borderRadius: BorderRadius.circular(4)),
+                            child: const Text('Tú',
+                                style: TextStyle(
+                                    fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ],
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.check_circle_outline, color: Colors.greenAccent, size: 16),
+                            SizedBox(width: 4),
+                            Text('Juega',
+                                style: TextStyle(
+                                    color: Colors.greenAccent,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        _buildBotonAdmin(j, 'confirmado'),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          if (enEsperaConfirmados.isNotEmpty) ...[
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('En Espera (Confirmaron)',
+                    style: TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.bold, color: Colors.orangeAccent)),
+                Text('${enEsperaConfirmados.length}',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: enEsperaConfirmados.length,
+              itemBuilder: (context, index) {
+                final j = enEsperaConfirmados[index];
+                final esYo = sonElMismoJugador(j.nombre, widget.nombreJugador);
+
+                return Card(
+                  margin: const EdgeInsets.symmetric(vertical: 4),
+                  color: Colors.orangeAccent.withValues(alpha: 0.08),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    side: BorderSide(color: Colors.orangeAccent.withValues(alpha: 0.3)),
+                  ),
+                  child: ListTile(
+                    dense: true,
+                    leading: CircleAvatar(
+                      radius: 14,
+                      backgroundColor: Colors.orange.shade900,
+                      child: Text('${index + 1}',
+                          style: const TextStyle(
+                              fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+                    ),
+                    title: Row(
+                      children: [
+                        Expanded(
+                            child: Text(j.nombre, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                        if (esYo) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                                color: Colors.blueAccent, borderRadius: BorderRadius.circular(4)),
+                            child: const Text('Tú',
+                                style: TextStyle(
+                                    fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ],
+                    ),
+                    subtitle: Text(
+                      prioritariosPendientes.isNotEmpty
+                          ? 'Esperando respuesta de ${prioritariosPendientes.length} titular(es) con reserva'
+                          : 'Esperando que se libere cupo por baja',
+                      style: const TextStyle(fontSize: 10, color: Colors.white60),
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '${index + 1}° en cola',
+                          style: const TextStyle(
+                              fontSize: 11, color: Colors.orangeAccent, fontWeight: FontWeight.bold),
+                        ),
+                        _buildBotonAdmin(j, 'confirmado'),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+          if (pendientes.isNotEmpty) ...[
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Sin Responder / Pendientes',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)),
+                Text('${pendientes.length}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: pendientes.length,
+              itemBuilder: (context, index) {
+                final j = pendientes[index];
+                final bool esTitularPrioritario =
+                    prioritarios.any((p) => sonElMismoJugador(p.nombre, j.nombre));
+                final bool esTitularEnRiesgo = !esTitularPrioritario &&
+                    widget.titulares.skip(cupoMaximo).any((t) => sonElMismoJugador(t.nombre, j.nombre));
+
+                String subtitulo;
+                Color colorSubtitulo;
+                IconData icono;
+
+                if (esTitularPrioritario) {
+                  subtitulo = 'Cupo reservado por rotación';
+                  colorSubtitulo = Colors.amberAccent;
+                  icono = Icons.shield_outlined;
+                } else if (esTitularEnRiesgo) {
+                  subtitulo = 'Cupo sujeto a disponibilidad por rotación';
+                  colorSubtitulo = Colors.orangeAccent;
+                  icono = Icons.swap_vert;
+                } else {
+                  subtitulo = 'Cupo sujeto a disponibilidad por suplencia';
+                  colorSubtitulo = Colors.grey;
+                  icono = Icons.person_outline;
+                }
+
+                return Card(
+                  margin: const EdgeInsets.symmetric(vertical: 2),
+                  color: Colors.white.withValues(alpha: 0.02),
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(
+                      icono,
+                      size: 18,
+                      color: colorSubtitulo,
+                    ),
+                    title: Text(j.nombre, style: const TextStyle(color: Colors.white70)),
+                    subtitle: Text(
+                      subtitulo,
+                      style: TextStyle(fontSize: 10, color: colorSubtitulo),
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Sin responder', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                        _buildBotonAdmin(j, 'pendiente'),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+          if (bajas.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Text('No juegan (${bajas.length})',
+                style:
+                    const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)),
+            const SizedBox(height: 8),
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: bajas.length,
+              itemBuilder: (context, index) {
+                final j = bajas[index];
+                return Card(
+                  color: Colors.white.withValues(alpha: 0.03),
+                  margin: const EdgeInsets.symmetric(vertical: 2),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  child: ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.person_off_outlined, color: Colors.grey, size: 18),
+                    title: Text(j.nombre, style: const TextStyle(color: Colors.grey)),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Baja',
+                            style: TextStyle(
+                                color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.w600)),
+                        _buildBotonAdmin(j, 'baja'),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+          const SizedBox(height: 24),
+        ],
+      ),
     );
   }
 }
 
-/// Segunda pestaña: Tabla de Posiciones y Carga de Resultado
+// ============================================================================
+// TABLA SCREEN (PODIO 1, 2 Y 3 EN NARANJA + EQUIPO CELESTE/AMARILLO)
+// ============================================================================
 class TablaScreen extends StatefulWidget {
   final bool esAdmin;
   final bool puedeCargarResultado;
@@ -2237,17 +2604,13 @@ class _TablaScreenState extends State<TablaScreen> {
   int _vistaSeleccionada = 0;
 
   void _mostrarDialogoCargarResultado(BuildContext context) async {
-    final snapshotConvocados = await FirebaseFirestore.instance
-        .collection('partidos')
-        .doc('actual')
-        .collection('convocados')
-        .where('estado', isEqualTo: 'confirmado')
-        .get();
+    final snapshotPartido = await FirebaseFirestore.instance.collection('partidos').doc('actual').get();
+    final Map<String, dynamic> asistencia =
+        (snapshotPartido.data()?['asistencia'] as Map<String, dynamic>?) ?? {};
 
-    List<String> jugadoresDisponibles = snapshotConvocados.docs
-        .map((d) => limpiarNombre(d.data()['nombre']?.toString()))
-        .where((n) => n.isNotEmpty)
-        .toSet()
+    List<String> jugadoresDisponibles = asistencia.entries
+        .where((e) => e.value == 'confirmado')
+        .map((e) => e.key)
         .toList();
 
     if (jugadoresDisponibles.isEmpty) {
@@ -2259,8 +2622,8 @@ class _TablaScreenState extends State<TablaScreen> {
     final fechaCtrl = TextEditingController(text: formatearFechaEspanol(DateTime.now()));
     final golesACtrl = TextEditingController(text: '0');
     final golesBCtrl = TextEditingController(text: '0');
-    final nombreEquipoACtrl = TextEditingController(text: 'Equipo Blanco');
-    final nombreEquipoBCtrl = TextEditingController(text: 'Equipo Negro');
+    final nombreEquipoACtrl = TextEditingController(text: 'Equipo Celeste');
+    final nombreEquipoBCtrl = TextEditingController(text: 'Equipo Amarillo');
 
     final Map<String, int> asignaciones = {
       for (var j in jugadoresDisponibles) j: 0,
@@ -2479,7 +2842,10 @@ class _TablaScreenState extends State<TablaScreen> {
           final bool empate = golesA == golesB;
 
           void registrar(String jugadorRaw, bool gano, bool empato, bool perdio, int gf, int gc) {
-            final jugador = limpiarNombre(jugadorRaw);
+            final l = limpiarNombre(jugadorRaw);
+            final jugador = l.isNotEmpty ? l : jugadorRaw.trim();
+            if (jugador.isEmpty) return;
+
             stats.putIfAbsent(jugador, () => {'pj': 0, 'pg': 0, 'pe': 0, 'pp': 0, 'pts': 0, 'gf': 0, 'gc': 0});
             stats[jugador]!['pj'] = stats[jugador]!['pj']! + 1;
             stats[jugador]!['gf'] = stats[jugador]!['gf']! + gf;
@@ -2600,6 +2966,9 @@ class _TablaScreenState extends State<TablaScreen> {
                         final data = item.value;
                         final esYo = sonElMismoJugador(nombre, widget.nombreJugador);
 
+                        final bool esPodio = index == 0 || index == 1 || index == 2;
+                        final Color colorNumero = esPodio ? Colors.orangeAccent : Colors.grey;
+
                         return Card(
                           margin: const EdgeInsets.symmetric(vertical: 3),
                           color: esYo
@@ -2617,14 +2986,13 @@ class _TablaScreenState extends State<TablaScreen> {
                               children: [
                                 SizedBox(
                                   width: 24,
-                                  child: Text('${index + 1}',
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          color: index == 0
-                                              ? Colors.amber
-                                              : (index == 1
-                                                  ? Colors.white70
-                                                  : (index == 2 ? Colors.orangeAccent : Colors.grey)))),
+                                  child: Text(
+                                    '${index + 1}',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: colorNumero,
+                                    ),
+                                  ),
                                 ),
                                 Expanded(
                                     child: Text(nombre,
@@ -2683,8 +3051,8 @@ class _TablaScreenState extends State<TablaScreen> {
                         final data = docs[index].data() as Map<String, dynamic>;
                         final docId = docs[index].id;
                         final fecha = data['fecha'] ?? 'Fecha';
-                        final eqA = data['equipoA_nombre'] ?? 'Equipo Blanco';
-                        final eqB = data['equipoB_nombre'] ?? 'Equipo Negro';
+                        final eqA = data['equipoA_nombre'] ?? 'Equipo Celeste';
+                        final eqB = data['equipoB_nombre'] ?? 'Equipo Amarillo';
                         final int golesA = data['equipoA_goles'] ?? 0;
                         final int golesB = data['equipoB_goles'] ?? 0;
                         final List jugsA = data['equipoA_jugadores'] ?? [];
@@ -2796,7 +3164,9 @@ class _TablaScreenState extends State<TablaScreen> {
   }
 }
 
-/// Tercera pestaña: Lista de Rotación en Verde y Rojo + Camisetas
+// ============================================================================
+// ROTACIÓN SCREEN (LISTA DE ROTACIÓN Y CAMISETAS)
+// ============================================================================
 class RotacionScreen extends StatelessWidget {
   final bool esAdmin;
   final List<Jugador> titulares;
