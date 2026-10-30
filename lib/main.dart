@@ -15,7 +15,7 @@ import 'package:timezone/timezone.dart' as tz;
 // ============================================================================
 // CONFIGURACIÃ“N DE ACCESOS, GITHUB Y VERSIÃ“N
 // ============================================================================
-const String kAppVersion = '1.0.6';
+const String kAppVersion = '1.0.7';
 const String kGitHubUser = 'DemianGodOk';
 const String kGitHubRepo = 'Fulbito';
 
@@ -475,7 +475,13 @@ class LoginScreen extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
+              Text(
+                'VersiÃ³n $kAppVersion',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              ),
+              const SizedBox(height: 16),
             ],
           ),
         ),
@@ -624,7 +630,6 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
 
     if (fechaPartido == null) return;
 
-    // LÃ­mite: las 00:00:00 hs del dÃ­a posterior al partido
     final limiteExpiracion = DateTime(fechaPartido.year, fechaPartido.month, fechaPartido.day + 1);
 
     if (DateTime.now().isAfter(limiteExpiracion)) {
@@ -1107,7 +1112,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
   }
 }
 
-/// Pantalla autÃ³noma para gestionar el Plantel (Directo a Firestore)
+/// Pantalla para gestionar el Plantel (Directo a Firestore)
 class GestionPlantelScreen extends StatefulWidget {
   const GestionPlantelScreen({super.key});
 
@@ -1582,7 +1587,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
   }
 }
 
-/// Convocatoria: Asistencia general con reserva estricta de cupos por prioridad y notificaciones
+/// Convocatoria
 class ConvocatoriaScreen extends StatefulWidget {
   final String nombreJugador;
   final String emailJugador;
