@@ -15,7 +15,7 @@ import 'package:timezone/timezone.dart' as tz;
 // ============================================================================
 // CONFIGURACIÓN DE ACCESOS, GITHUB Y VERSIÓN UNIFICADA
 // ============================================================================
-String gAppVersion = '1.0.12';
+String gAppVersion = '1.0.13';
 const String kGitHubUser = 'DemianGodOk';
 const String kGitHubRepo = 'Fulbito';
 
@@ -639,7 +639,7 @@ class LoginScreen extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'S.V.F.C. - Gestión de partidos, rotación y vestuario.',
+                'Fulbito - Gestión de partidos.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 15, color: Colors.grey[400], height: 1.4),
               ),
@@ -1407,7 +1407,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                   child: CircleAvatar(
                       backgroundColor: Colors.white, backgroundImage: AssetImage('assets/logo.jpg')),
                 ),
-                title: const Text('Fulbito',
+                title: const Text('S.V.F.C. Oficial',
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                 actions: [
                   PopupMenuButton<String>(
