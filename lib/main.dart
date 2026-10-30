@@ -15,7 +15,7 @@ import 'package:timezone/timezone.dart' as tz;
 // ============================================================================
 // CONFIGURACIÓN DE ACCESOS, GITHUB Y VERSIÓN UNIFICADA
 // ============================================================================
-String gAppVersion = '1.0.14';
+String gAppVersion = '1.0.15';
 const String kGitHubUser = 'DemianGodOk';
 const String kGitHubRepo = 'Fulbito';
 
@@ -2579,7 +2579,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
 }
 
 // ============================================================================
-// TABLA SCREEN (PODIO 1, 2 Y 3 EN NARANJA + EQUIPO CELESTE/AMARILLO)
+// TABLA SCREEN (POSICIONES, PARTIDOS Y ESTADÍSTICAS)
 // ============================================================================
 class TablaScreen extends StatefulWidget {
   final bool esAdmin;
@@ -2814,6 +2814,308 @@ class _TablaScreenState extends State<TablaScreen> {
     );
   }
 
+  Widget _buildVistaEstadisticas(List<QueryDocumentSnapshot> docs) {
+    if (docs.isEmpty) {
+      return Card(
+        color: Colors.white.withValues(alpha: 0.03),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        child: const Padding(
+          padding: EdgeInsets.all(24.0),
+          child: Center(
+            child: Text(
+              'Aún no hay partidos cargados para calcular estadísticas.',
+              style: TextStyle(color: Colors.grey),
+            ),
+          ),
+        ),
+      );
+    }
+
+    String canonicalizar(String raw) {
+      final l = limpiarNombre(raw);
+      final base = l.isNotEmpty ? l : raw.trim();
+      for (final t in widget.titulares) {
+        if (sonElMismoJugador(t.nombre, base)) {
+          return t.nombre;
+        }
+      }
+      return base;
+    }
+
+    // Orden cronológico (del más viejo al más nuevo) para evaluar rachas consecutivas
+    final cronologicos = docs.reversed.toList();
+
+    final Map<String, int> victoriasJuntos = {};
+    final Map<String, int> derrotasJuntos = {};
+    final Map<String, int> partidosJuntos = {};
+
+    final Map<String, int> partidosEnfrentados = {};
+    final Map<String, Map<String, int>> victoriasEnfrentados = {};
+    final Map<String, int> empatesEnfrentados = {};
+
+    final Map<String, int> rachaActual = {};
+    final Map<String, int> rachaHistorica = {};
+
+    for (var doc in cronologicos) {
+      final data = doc.data() as Map<String, dynamic>;
+      final int golesA = data['equipoA_goles'] ?? 0;
+      final int golesB = data['equipoB_goles'] ?? 0;
+      final List rawA = data['equipoA_jugadores'] ?? [];
+      final List rawB = data['equipoB_jugadores'] ?? [];
+
+      final List<String> teamA = rawA
+          .map((j) => canonicalizar(j.toString()))
+          .where((j) => j.isNotEmpty)
+          .toSet()
+          .toList();
+      final List<String> teamB = rawB
+          .map((j) => canonicalizar(j.toString()))
+          .where((j) => j.isNotEmpty)
+          .toSet()
+          .toList();
+
+      final bool ganaA = golesA > golesB;
+      final bool ganaB = golesB > golesA;
+
+      void procesarDuplas(List<String> eq, bool gano, bool perdio) {
+        for (int i = 0; i < eq.length; i++) {
+          for (int j = i + 1; j < eq.length; j++) {
+            final par = [eq[i], eq[j]]..sort();
+            final key = '${par[0]}___${par[1]}';
+            partidosJuntos[key] = (partidosJuntos[key] ?? 0) + 1;
+            if (gano) {
+              victoriasJuntos[key] = (victoriasJuntos[key] ?? 0) + 1;
+            } else if (perdio) {
+              derrotasJuntos[key] = (derrotasJuntos[key] ?? 0) + 1;
+            }
+          }
+        }
+      }
+
+      procesarDuplas(teamA, ganaA, ganaB);
+      procesarDuplas(teamB, ganaB, ganaA);
+
+      // Rivales clásicos (jugaron en equipos opuestos)
+      for (final pA in teamA) {
+        for (final pB in teamB) {
+          if (pA == pB) continue;
+          final par = [pA, pB]..sort();
+          final key = '${par[0]}___${par[1]}';
+          partidosEnfrentados[key] = (partidosEnfrentados[key] ?? 0) + 1;
+          victoriasEnfrentados.putIfAbsent(key, () => {par[0]: 0, par[1]: 0});
+
+          if (ganaA) {
+            victoriasEnfrentados[key]![pA] = (victoriasEnfrentados[key]![pA] ?? 0) + 1;
+          } else if (ganaB) {
+            victoriasEnfrentados[key]![pB] = (victoriasEnfrentados[key]![pB] ?? 0) + 1;
+          } else {
+            empatesEnfrentados[key] = (empatesEnfrentados[key] ?? 0) + 1;
+          }
+        }
+      }
+
+      // Racha histórica de victorias consecutivas
+      final participantes = {...teamA, ...teamB};
+      for (final p in participantes) {
+        final enA = teamA.contains(p);
+        final gano = enA ? ganaA : ganaB;
+
+        if (gano) {
+          rachaActual[p] = (rachaActual[p] ?? 0) + 1;
+          if (rachaActual[p]! > (rachaHistorica[p] ?? 0)) {
+            rachaHistorica[p] = rachaActual[p]!;
+          }
+        } else {
+          rachaActual[p] = 0;
+        }
+      }
+    }
+
+    // 1. La mejor dupla
+    String? mejorDuplaP1, mejorDuplaP2;
+    int mejorDuplaVictorias = 0;
+    int mejorDuplaTotal = 0;
+    for (final entry in victoriasJuntos.entries) {
+      if (entry.value > mejorDuplaVictorias) {
+        mejorDuplaVictorias = entry.value;
+        final partes = entry.key.split('___');
+        mejorDuplaP1 = partes[0];
+        mejorDuplaP2 = partes[1];
+        mejorDuplaTotal = partidosJuntos[entry.key] ?? entry.value;
+      }
+    }
+
+    // 2. La peor dupla
+    String? peorDuplaP1, peorDuplaP2;
+    int peorDuplaDerrotas = 0;
+    int peorDuplaTotal = 0;
+    for (final entry in derrotasJuntos.entries) {
+      if (entry.value > peorDuplaDerrotas) {
+        peorDuplaDerrotas = entry.value;
+        final partes = entry.key.split('___');
+        peorDuplaP1 = partes[0];
+        peorDuplaP2 = partes[1];
+        peorDuplaTotal = partidosJuntos[entry.key] ?? entry.value;
+      }
+    }
+
+    // 3. Rivales clásicos
+    String? rivalP1, rivalP2;
+    int maxEnfrentamientos = 0;
+    int rivalWins1 = 0;
+    int rivalWins2 = 0;
+    int rivalEmpates = 0;
+    for (final entry in partidosEnfrentados.entries) {
+      if (entry.value > maxEnfrentamientos) {
+        maxEnfrentamientos = entry.value;
+        final partes = entry.key.split('___');
+        rivalP1 = partes[0];
+        rivalP2 = partes[1];
+        final mapWins = victoriasEnfrentados[entry.key] ?? {};
+        rivalWins1 = mapWins[rivalP1] ?? 0;
+        rivalWins2 = mapWins[rivalP2] ?? 0;
+        rivalEmpates = empatesEnfrentados[entry.key] ?? 0;
+      }
+    }
+
+    // 4. Racha histórica
+    String? rachaJugador;
+    int maxRacha = 0;
+    for (final entry in rachaHistorica.entries) {
+      if (entry.value > maxRacha) {
+        maxRacha = entry.value;
+        rachaJugador = entry.key;
+      }
+    }
+
+    Widget buildStatCard({
+      required IconData icon,
+      required Color iconColor,
+      required String titulo,
+      required String nombrePrincipal,
+      required String detalle,
+      String? subdetalle,
+    }) {
+      return Card(
+        margin: const EdgeInsets.only(bottom: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        color: const Color(0xFF16253B),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: iconColor.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: iconColor, size: 24),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      titulo.toUpperCase(),
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: iconColor,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      nombrePrincipal,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      detalle,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey,
+                      ),
+                    ),
+                    if (subdetalle != null && subdetalle.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subdetalle,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey.shade400,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        buildStatCard(
+          icon: Icons.star_rounded,
+          iconColor: Colors.tealAccent,
+          titulo: 'La mejor dupla',
+          nombrePrincipal: mejorDuplaP1 != null
+              ? '$mejorDuplaP1 & $mejorDuplaP2'
+              : 'Sin datos suficientes',
+          detalle: mejorDuplaP1 != null
+              ? '$mejorDuplaVictorias victorias ($mejorDuplaTotal partidos juntos)'
+              : 'Se necesitan victorias en equipo para calcular',
+        ),
+        buildStatCard(
+          icon: Icons.heart_broken_outlined,
+          iconColor: Colors.redAccent,
+          titulo: 'La peor dupla',
+          nombrePrincipal: peorDuplaP1 != null
+              ? '$peorDuplaP1 & $peorDuplaP2'
+              : 'Sin datos suficientes',
+          detalle: peorDuplaP1 != null
+              ? '$peorDuplaDerrotas derrotas ($peorDuplaTotal partidos juntos)'
+              : 'Se necesitan derrotas en equipo para calcular',
+        ),
+        buildStatCard(
+          icon: Icons.compare_arrows_rounded,
+          iconColor: Colors.orangeAccent,
+          titulo: 'Rivales clásicos',
+          nombrePrincipal: rivalP1 != null
+              ? '$rivalP1 vs $rivalP2'
+              : 'Sin datos suficientes',
+          detalle: rivalP1 != null
+              ? '$maxEnfrentamientos partidos cara a cara'
+              : 'Se necesitan enfrentamientos cruzados para calcular',
+          subdetalle: rivalP1 != null
+              ? '$rivalP1: $rivalWins1 vict. | $rivalP2: $rivalWins2 vict. | Empates: $rivalEmpates'
+              : null,
+        ),
+        buildStatCard(
+          icon: Icons.local_fire_department_rounded,
+          iconColor: Colors.amberAccent,
+          titulo: 'Racha Histórica',
+          nombrePrincipal: rachaJugador ?? 'Sin datos suficientes',
+          detalle: rachaJugador != null
+              ? '$maxRacha victorias consecutivas'
+              : 'Se necesitan partidos ganados para calcular',
+        ),
+        const SizedBox(height: 80),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
@@ -2884,13 +3186,24 @@ class _TablaScreenState extends State<TablaScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 SegmentedButton<int>(
+                  showSelectedIcon: false,
+                  style: SegmentedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                  ),
                   segments: const [
                     ButtonSegment(
                         value: 0,
-                        label: Text('Tabla de Posiciones'),
-                        icon: Icon(Icons.format_list_numbered)),
+                        label: Text('Posiciones', style: TextStyle(fontSize: 12)),
+                        icon: Icon(Icons.format_list_numbered, size: 16)),
                     ButtonSegment(
-                        value: 1, label: Text('Partidos Jugados'), icon: Icon(Icons.history)),
+                        value: 1,
+                        label: Text('Partidos', style: TextStyle(fontSize: 12)),
+                        icon: Icon(Icons.history, size: 16)),
+                    ButtonSegment(
+                        value: 2,
+                        label: Text('Estadísticas', style: TextStyle(fontSize: 12)),
+                        icon: Icon(Icons.query_stats, size: 16)),
                   ],
                   selected: {_vistaSeleccionada},
                   onSelectionChanged: (val) => setState(() => _vistaSeleccionada = val.first),
@@ -3143,6 +3456,9 @@ class _TablaScreenState extends State<TablaScreen> {
                         );
                       },
                     ),
+                ],
+                if (_vistaSeleccionada == 2) ...[
+                  _buildVistaEstadisticas(docs),
                 ],
                 const SizedBox(height: 80),
               ],
