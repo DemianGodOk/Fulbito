@@ -15,7 +15,7 @@ import 'package:timezone/timezone.dart' as tz;
 // ============================================================================
 // CONFIGURACIÓN DE ACCESOS, GITHUB Y VERSIÓN UNIFICADA
 // ============================================================================
-String gAppVersion = '1.0.10';
+String gAppVersion = '1.0.11';
 const String kGitHubUser = 'DemianGodOk';
 const String kGitHubRepo = 'Fulbito';
 
@@ -336,7 +336,7 @@ void _mostrarDialogoDescargaEInstalacion(
 
           try {
             OtaUpdate()
-                .execute(urlDescarga, destinationFilename: 'fulbito.apk')
+                .execute(urlDescarga, destinationFilename: 'svfc.apk')
                 .listen(
               (OtaEvent event) {
                 setDialogState(() {
@@ -714,12 +714,12 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
       final doc = await docRef.get();
       final List<dynamic> actuales = doc.exists ? (doc.data()?['mensajes'] as List<dynamic>? ?? []) : [];
 
-      List> filtrados = [];
-      for (var m in actuales) {
+      List<dynamic> filtrados = [];
+      for (final m in actuales) {
         if (m is Map) {
           final ts = m['ts'];
           if (ts is int && ts > limite24hs) {
-            filtrados.add(Map<String, dynamic>.from(m));
+            filtrados.add(m);
           }
         }
       }
@@ -807,14 +807,14 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
 
               final data = snap.data?.data() as Map<String, dynamic>? ?? {};
               final limite24hs = DateTime.now().subtract(const Duration(hours: 24)).millisecondsSinceEpoch;
-              final rawMensajes = (data['mensajes'] as List<dynamic>? ?? []);
+              final List<dynamic> rawMensajes = (data['mensajes'] as List<dynamic>? ?? []);
 
-              final List> mensajes = [];
-              for (var m in rawMensajes) {
+              final List<dynamic> mensajes = [];
+              for (final m in rawMensajes) {
                 if (m is Map) {
                   final ts = m['ts'];
                   if (ts is int && ts > limite24hs) {
-                    mensajes.add(Map<String, dynamic>.from(m));
+                    mensajes.add(m);
                   }
                 }
               }
@@ -1352,7 +1352,6 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
               plantel: todos,
             );
 
-            // Notificación de baja para administradores
             if (_esAdmin && infoPartido['ultimaAlerta'] != null) {
               final alerta = infoPartido['ultimaAlerta'];
               final ts = (alerta['timestamp'] as Timestamp?)?.toDate();
