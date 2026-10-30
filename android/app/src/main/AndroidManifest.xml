@@ -1,4 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+﻿<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
@@ -31,7 +31,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Receptores para reprogramar recordatorios automáticos si se reinicia el teléfono -->
+        <!-- Receptores para reprogramar recordatorios automÃ¡ticos si se reinicia el telÃ©fono -->
         <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
         <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
             <intent-filter>

@@ -1,7 +1,7 @@
-$pubspecPath = "pubspec.yaml"
+﻿$pubspecPath = "pubspec.yaml"
 $mainPath = "lib/main.dart"
 
-# 1. Leer y subir versi�n en pubspec.yaml
+# 1. Leer y subir versión en pubspec.yaml
 $content = Get-Content $pubspecPath -Raw
 if ($content -match 'version:\s*(\d+)\.(\d+)\.(\d+)\+(\d+)') {
     $major = $matches[1]
@@ -11,11 +11,11 @@ if ($content -match 'version:\s*(\d+)\.(\d+)\.(\d+)\+(\d+)') {
     $newVersion = "$major.$minor.$patch"
     $newVersionFull = "$newVersion+$build"
     
-    $content = $content -replace 'version:\s*(\d+)\.(\d+)\+(\d+)', "version: $newVersionFull"
-    [IO.File]::WriteAllText($pubspecPath, $content)
+    $content = $content -replace 'version:\s*(\d+)\.(\d+)\.(\d+)\+(\d+)', "version: $newVersionFull"
+    Set-Content -Path $pubspecPath -Value $content -NoNewline -Encoding UTF8
     Write-Host ">> Version incrementada a $newVersionFull" -ForegroundColor Green
 } else {
-    Write-Host "Error: No se encontro el patron de version en pubspec.yaml" -ForegroundColor Red
+    Write-Host "Error: No se encontro el formato de version en pubspec.yaml" -ForegroundColor Red
     exit 1
 }
 
@@ -23,7 +23,7 @@ if ($content -match 'version:\s*(\d+)\.(\d+)\.(\d+)\+(\d+)') {
 if (Test-Path $mainPath) {
     $mainContent = Get-Content $mainPath -Raw
     $mainContent = $mainContent -replace "const String kAppVersion = '.*?';", "const String kAppVersion = '$newVersion';"
-    [IO.File]::WriteAllText($mainPath, $mainContent)
+    Set-Content -Path $mainPath -Value $mainContent -NoNewline -Encoding UTF8
     Write-Host ">> kAppVersion actualizada a '$newVersion' en main.dart" -ForegroundColor Green
 }
 
@@ -40,5 +40,5 @@ git push origin "v$newVersion"
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Yellow
 Write-Host " LISTO: Tag v$newVersion enviado a GitHub." -ForegroundColor Yellow
-Write-Host " GitHub Actions tomo el tag y empezo a compilar el APK." -ForegroundColor Yellow
+Write-Host " GitHub Actions empezo a compilar svfc.apk en la nube." -ForegroundColor Yellow
 Write-Host "==========================================================" -ForegroundColor Yellow
