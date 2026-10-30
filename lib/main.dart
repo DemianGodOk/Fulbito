@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -11,13 +12,16 @@ import 'package:ota_update/ota_update.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
+import 'package:url_launcher/url_launcher.dart';
 
 // ============================================================================
 // CONFIGURACIÓN DE ACCESOS, GITHUB Y VERSIÓN UNIFICADA
 // ============================================================================
-String gAppVersion = '1.0.16';
+
+String gAppVersion = '1.0.17';
 const String kGitHubUser = 'DemianGodOk';
 const String kGitHubRepo = 'Fulbito';
+const String kNombreTorneo = 'Torneo Fulbito';
 
 const bool kBypassLogin = false;
 const String kSuperAdminEmail = 'demian.soriano@gmail.com';
@@ -25,6 +29,7 @@ const String kSuperAdminEmail = 'demian.soriano@gmail.com';
 // ============================================================================
 // SERVICIO DE NOTIFICACIONES LOCALES
 // ============================================================================
+
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
@@ -38,9 +43,7 @@ Future<void> inicializarNotificaciones() async {
   const InitializationSettings initializationSettings =
       InitializationSettings(android: initializationSettingsAndroid);
 
-  await flutterLocalNotificationsPlugin.initialize(
-    initializationSettings,
-  );
+  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
 
   final androidImpl = flutterLocalNotificationsPlugin
       .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
@@ -98,13 +101,14 @@ Future<void> programarRecordatorioAsistencia({
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
     );
   } catch (e) {
-    debugPrint("Error al programar recordatorio: $e");
+    debugPrint('Error al programar recordatorio: $e');
   }
 }
 
 // ============================================================================
 // MODELOS Y UTILIDADES
 // ============================================================================
+
 class Jugador {
   String nombre;
   String email;
@@ -119,25 +123,68 @@ class Jugador {
   });
 
   Map<String, dynamic> toMap() => {
-    'nombre': nombre,
-    'email': email,
-    'uid': uid,
-    'esModerador': esModerador,
-  };
+        'nombre': nombre,
+        'email': email,
+        'uid': uid,
+        'esModerador': esModerador,
+      };
 
   factory Jugador.fromMap(Map<String, dynamic> map) => Jugador(
-    nombre: map['nombre'] ?? '',
-    email: map['email'] ?? '',
-    uid: map['uid'] ?? '',
-    esModerador: map['esModerador'] ?? false,
-  );
+        nombre: (map['nombre'] ?? '').toString(),
+        email: (map['email'] ?? '').toString(),
+        uid: (map['uid'] ?? '').toString(),
+        esModerador: (map['esModerador'] ?? false) as bool,
+      );
 }
 
 String limpiarNombre(String? raw) {
   if (raw == null || raw.trim().isEmpty) return '';
   final limpio = raw.replaceAll(RegExp(r'\s*\([^)]*\)'), '').trim();
-  if (limpio.toLowerCase() == 'jugador s.v.f.c.') return '';
+  final lower = limpio.toLowerCase();
+  if (lower == 'jugador s.v.f.c.' ||
+      lower == 'jugador svfc' ||
+      lower == 'jugador') {
+    return '';
+  }
   return limpio;
+}
+
+String sanitizarNombreUsuario({String? nombre, String? email}) {
+  final nombreLimpio = limpiarNombre(nombre);
+  if (nombreLimpio.isNotEmpty) {
+    return nombreLimpio;
+  }
+
+  final emailLimpio = (email ?? '').trim();
+  if (emailLimpio.contains('@')) {
+    final localPart = emailLimpio.split('@').first.trim();
+    if (localPart.isNotEmpty) {
+      final parte = localPart[0].toUpperCase() +
+          (localPart.length > 1 ? localPart.substring(1).toLowerCase() : '');
+      return parte;
+    }
+  }
+
+  return 'Jugador';
+}
+
+String nombreLegibleUsuario(Map<String, dynamic> u) {
+  final String raw = (u['nombre'] ?? '').toString();
+  final String limpio = limpiarNombre(raw);
+  if (limpio.isNotEmpty) {
+    return limpio;
+  }
+
+  final String email = (u['email'] ?? '').toString().trim();
+  if (email.contains('@')) {
+    final pre = email.split('@').first.trim();
+    if (pre.isNotEmpty) {
+      return pre[0].toUpperCase() +
+          (pre.length > 1 ? pre.substring(1).toLowerCase() : '');
+    }
+  }
+
+  return 'Jugador';
 }
 
 String _normalizar(String s) {
@@ -174,23 +221,52 @@ bool sonElMismoJugador(String nombreA, String nombreB) {
 }
 
 String formatearFechaEspanol(DateTime date) {
-  const dias = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+  const dias = [
+    'Lunes',
+    'Martes',
+    'Miércoles',
+    'Jueves',
+    'Viernes',
+    'Sábado',
+    'Domingo'
+  ];
   const meses = [
-    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
-    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+    'Enero',
+    'Febrero',
+    'Marzo',
+    'Abril',
+    'Mayo',
+    'Junio',
+    'Julio',
+    'Agosto',
+    'Septiembre',
+    'Octubre',
+    'Noviembre',
+    'Diciembre'
   ];
   return '${dias[date.weekday - 1]} ${date.day} de ${meses[date.month - 1]}';
 }
 
 DateTime? _parsearFechaEspanol(String texto) {
   try {
-    final match = RegExp(r'(\d+)\s+de\s+(\w+)', caseSensitive: false).firstMatch(texto);
+    final match =
+        RegExp(r'(\d+)\s+de\s+(\w+)', caseSensitive: false).firstMatch(texto);
     if (match != null) {
       final dia = int.tryParse(match.group(1)!) ?? 1;
       final mesNombre = match.group(2)!.toLowerCase();
       const meses = [
-        'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
-        'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
+        'enero',
+        'febrero',
+        'marzo',
+        'abril',
+        'mayo',
+        'junio',
+        'julio',
+        'agosto',
+        'septiembre',
+        'octubre',
+        'noviembre',
+        'diciembre'
       ];
       final mesIdx = meses.indexOf(mesNombre);
       if (mesIdx != -1) {
@@ -217,39 +293,33 @@ String resolverAliasOPrimerNombre({
   final emailLimpio = emailGoogle.toLowerCase().trim();
   final uidLimpio = uidGoogle?.trim() ?? '';
 
-  // 1. Alias asignado en el plantel de Firestore (coincidencia por correo o UID)
-  for (var j in plantel) {
+  for (final j in plantel) {
     final jEmail = j.email.toLowerCase().trim();
     final jUid = j.uid.trim();
     final matchEmail = jEmail.isNotEmpty && jEmail == emailLimpio;
     final matchUid = jUid.isNotEmpty && uidLimpio.isNotEmpty && jUid == uidLimpio;
     if (matchEmail || matchUid) {
-      if (j.nombre.trim().isNotEmpty) {
-        return j.nombre.trim();
-      }
+      if (j.nombre.trim().isNotEmpty) return j.nombre.trim();
     }
   }
 
-  for (var j in plantel) {
+  for (final j in plantel) {
     if (j.nombre.trim().isNotEmpty && sonElMismoJugador(j.nombre, nombreGoogle)) {
       return j.nombre.trim();
     }
   }
 
-  // 2. Únicamente el primer nombre de la cuenta de Google
   final limpio = limpiarNombre(nombreGoogle);
   if (limpio.isNotEmpty) {
     final primer = limpio.split(RegExp(r'\s+')).first.trim();
-    if (primer.isNotEmpty) {
-      return primer;
-    }
+    if (primer.isNotEmpty) return primer;
   }
 
-  // 3. Prefijo del correo antes del @ con primera letra mayúscula
   if (emailLimpio.isNotEmpty && emailLimpio.contains('@')) {
     final pre = emailLimpio.split('@').first.trim();
     if (pre.isNotEmpty) {
-      return pre[0].toUpperCase() + (pre.length > 1 ? pre.substring(1).toLowerCase() : '');
+      return pre[0].toUpperCase() +
+          (pre.length > 1 ? pre.substring(1).toLowerCase() : '');
     }
   }
 
@@ -257,11 +327,13 @@ String resolverAliasOPrimerNombre({
 }
 
 bool _esVersionMayor(String nueva, String actual) {
-  List<int> vNueva = nueva.split('.').map((e) => int.tryParse(e) ?? 0).toList();
-  List<int> vActual = actual.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+  final List<int> vNueva =
+      nueva.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+  final List<int> vActual =
+      actual.split('.').map((e) => int.tryParse(e) ?? 0).toList();
   for (int i = 0; i < 3; i++) {
-    int n = i < vNueva.length ? vNueva[i] : 0;
-    int a = i < vActual.length ? vActual[i] : 0;
+    final int n = i < vNueva.length ? vNueva[i] : 0;
+    final int a = i < vActual.length ? vActual[i] : 0;
     if (n > a) return true;
     if (n < a) return false;
   }
@@ -271,6 +343,7 @@ bool _esVersionMayor(String nueva, String actual) {
 // ============================================================================
 // VERIFICACIÓN Y ACTUALIZACIÓN OTA NATIVA
 // ============================================================================
+
 Future<void> verificarActualizacionGitHub(BuildContext context) async {
   if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
   if (kGitHubUser == 'TU_USUARIO_GITHUB') return;
@@ -292,21 +365,27 @@ Future<void> verificarActualizacionGitHub(BuildContext context) async {
 
     if (_esVersionMayor(versionRemota, gAppVersion) && context.mounted) {
       String urlDescarga = '';
-      final List assets = data['assets'] ?? [];
-      for (var asset in assets) {
-        final String nombreArchivo = asset['name']?.toString().toLowerCase() ?? '';
+      final List<dynamic> assets = data['assets'] ?? [];
+      for (final asset in assets) {
+        final String nombreArchivo =
+            (asset['name'] ?? '').toString().toLowerCase();
         if (nombreArchivo.endsWith('.apk')) {
-          urlDescarga = asset['browser_download_url'] ?? '';
+          urlDescarga = (asset['browser_download_url'] ?? '').toString();
           break;
         }
       }
 
       if (urlDescarga.isNotEmpty) {
-        _mostrarDialogoDescargaEInstalacion(context, versionRemota, gAppVersion, urlDescarga);
+        _mostrarDialogoDescargaEInstalacion(
+          context,
+          versionRemota,
+          gAppVersion,
+          urlDescarga,
+        );
       }
     }
   } catch (e) {
-    debugPrint("Error al verificar actualización en GitHub: $e");
+    debugPrint('Error al verificar actualización en GitHub: $e');
   }
 }
 
@@ -410,7 +489,10 @@ void _mostrarDialogoDescargaEInstalacion(
                     ),
                     child: Text(
                       errorTexto!,
-                      style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+                      style: const TextStyle(
+                        color: Colors.redAccent,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
                 ],
@@ -425,13 +507,18 @@ void _mostrarDialogoDescargaEInstalacion(
                   minHeight: 8,
                   borderRadius: BorderRadius.circular(4),
                   backgroundColor: Colors.white12,
-                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.tealAccent),
+                  valueColor: const AlwaysStoppedAnimation<Color>(
+                    Colors.tealAccent,
+                  ),
                 ),
                 const SizedBox(height: 12),
                 Text(
                   estadoTexto,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 13, color: Colors.tealAccent),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Colors.tealAccent,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 const Text(
@@ -464,6 +551,7 @@ void _mostrarDialogoDescargaEInstalacion(
 // ============================================================================
 // MAIN Y ARRANQUE
 // ============================================================================
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -478,12 +566,12 @@ void main() async {
     if (kIsWeb) {
       await Firebase.initializeApp(
         options: const FirebaseOptions(
-          apiKey: "AIzaSyBcalfFCa9fKb-VnY0hQFd9ehTr51I2lk8",
-          authDomain: "fulbito-svfc.firebaseapp.com",
-          projectId: "fulbito-svfc",
-          storageBucket: "fulbito-svfc.firebasestorage.app",
-          messagingSenderId: "112754897657",
-          appId: "1:112754897657:web:a52806ee7db2c045322828",
+          apiKey: 'AIzaSyBcalfFCa9fKb-VnY0hQFd9ehTr51I2lk8',
+          authDomain: 'fulbito-svfc.firebaseapp.com',
+          projectId: 'fulbito-svfc',
+          storageBucket: 'fulbito-svfc.firebasestorage.app',
+          messagingSenderId: '112754897657',
+          appId: '1:112754897657:web:a52806ee7db2c045322828',
         ),
       );
     } else {
@@ -491,7 +579,7 @@ void main() async {
       await inicializarNotificaciones();
     }
   } catch (e) {
-    debugPrint("Error al inicializar Firebase: $e");
+    debugPrint('Error al inicializar Firebase: $e');
   }
 
   runApp(const FulbitoApp());
@@ -531,36 +619,51 @@ class _AuthGateState extends State<AuthGate> {
   Future<void> _iniciarSesionGoogle() async {
     setState(() => _cargando = true);
     try {
-      GoogleAuthProvider googleProvider = GoogleAuthProvider();
+      final GoogleAuthProvider googleProvider = GoogleAuthProvider();
       googleProvider.addScope('email');
 
-      UserCredential cred;
-      if (kIsWeb) {
-        cred = await FirebaseAuth.instance.signInWithPopup(googleProvider);
-      } else {
-        cred = await FirebaseAuth.instance.signInWithProvider(googleProvider);
-      }
+      final UserCredential cred = kIsWeb
+          ? await FirebaseAuth.instance.signInWithPopup(googleProvider)
+          : await FirebaseAuth.instance.signInWithProvider(googleProvider);
 
       final user = cred.user;
       if (user != null) {
-        String nombreGuardar = limpiarNombre(user.displayName);
-        if (nombreGuardar.isEmpty && user.email != null && user.email!.contains('@')) {
-          final pre = user.email!.split('@').first.trim();
-          nombreGuardar = pre[0].toUpperCase() + (pre.length > 1 ? pre.substring(1).toLowerCase() : '');
-        }
+        final String nombreGuardar = sanitizarNombreUsuario(
+          nombre: user.displayName,
+          email: user.email,
+        );
 
-        await FirebaseFirestore.instance.collection('usuarios').doc(user.uid).set({
+        final docRef =
+            FirebaseFirestore.instance.collection('usuarios').doc(user.uid);
+        final docSnap = await docRef.get();
+        final bool esNuevo = !docSnap.exists;
+
+        await docRef.set({
           'uid': user.uid,
-          'nombre': nombreGuardar.isNotEmpty ? nombreGuardar : 'Jugador',
+          'nombre': nombreGuardar,
           'email': user.email ?? '',
           'fotoUrl': user.photoURL,
           'ultimoAcceso': FieldValue.serverTimestamp(),
+          if (esNuevo) 'creadoEn': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
+
+        if (esNuevo) {
+          await FirebaseFirestore.instance.collection('partidos').doc('actual').set({
+            'alertaNuevoUsuario': {
+              'nombre': nombreGuardar,
+              'email': user.email ?? '',
+              'timestamp': FieldValue.serverTimestamp(),
+            }
+          }, SetOptions(merge: true));
+        }
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al iniciar sesión: $e'), backgroundColor: Colors.redAccent),
+          SnackBar(
+            content: Text('Error al iniciar sesión: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
         );
       }
     } finally {
@@ -596,7 +699,10 @@ class _AuthGateState extends State<AuthGate> {
         }
 
         return PantallaPrincipal(
-          nombreJugador: limpiarNombre(user.displayName),
+          nombreJugador: sanitizarNombreUsuario(
+            nombre: user.displayName,
+            email: user.email,
+          ),
           emailJugador: user.email ?? '',
           fotoUrl: user.photoURL,
           onCerrarSesion: _cerrarSesion,
@@ -626,7 +732,10 @@ class LoginScreen extends StatelessWidget {
                 child: Container(
                   width: 130,
                   height: 130,
-                  decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white),
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white,
+                  ),
                   clipBehavior: Clip.antiAlias,
                   child: Image.asset('assets/logo.jpg', fit: BoxFit.cover),
                 ),
@@ -635,7 +744,11 @@ class LoginScreen extends StatelessWidget {
               const Text(
                 'Fulbito',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: 2.0),
+                style: TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 2.0,
+                ),
               ),
               const SizedBox(height: 8),
               Text(
@@ -649,7 +762,9 @@ class LoginScreen extends StatelessWidget {
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   side: BorderSide(color: Colors.grey.shade700),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   backgroundColor: Colors.white10,
                 ),
                 child: const Row(
@@ -657,8 +772,14 @@ class LoginScreen extends StatelessWidget {
                   children: [
                     Icon(Icons.g_mobiledata, size: 30, color: Colors.white),
                     SizedBox(width: 8),
-                    Text('Continuar con Google',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white)),
+                    Text(
+                      'Continuar con Google',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -680,6 +801,7 @@ class LoginScreen extends StatelessWidget {
 // ============================================================================
 // VESTUARIO (CHAT TEMPORAL 24 HORAS EN DOCUMENTO ÚNICO)
 // ============================================================================
+
 class VestuarioScreen extends StatefulWidget {
   final String aliasUsuario;
   const VestuarioScreen({super.key, required this.aliasUsuario});
@@ -708,11 +830,14 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
 
     try {
       final ahora = DateTime.now().millisecondsSinceEpoch;
-      final limite24hs = DateTime.now().subtract(const Duration(hours: 24)).millisecondsSinceEpoch;
+      final limite24hs =
+          DateTime.now().subtract(const Duration(hours: 24)).millisecondsSinceEpoch;
 
       final docRef = FirebaseFirestore.instance.collection('partidos').doc('actual_chat');
       final doc = await docRef.get();
-      final List<dynamic> actuales = doc.exists ? (doc.data()?['mensajes'] as List<dynamic>? ?? []) : [];
+      final List<dynamic> actuales = doc.exists
+          ? (doc.data()?['mensajes'] as List<dynamic>? ?? [])
+          : [];
 
       List<dynamic> filtrados = [];
       for (final m in actuales) {
@@ -738,9 +863,17 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
         'mensajes': filtrados,
       }, SetOptions(merge: true));
 
+      await FirebaseFirestore.instance.collection('partidos').doc('actual').set({
+        'alertaVestuario': {
+          'nombre': widget.aliasUsuario,
+          'texto': txt,
+          'timestamp': FieldValue.serverTimestamp(),
+        },
+      }, SetOptions(merge: true));
+
       _scrollHaciaAbajo();
     } catch (e) {
-      debugPrint("Error al enviar mensaje en vestuario: $e");
+      debugPrint('Error al enviar mensaje en vestuario: $e');
     } finally {
       if (mounted) setState(() => _enviando = false);
     }
@@ -766,7 +899,9 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
             color: const Color(0xFF16253B),
-            border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.05))),
+            border: Border(
+              bottom: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
+            ),
           ),
           child: Row(
             children: [
@@ -785,7 +920,11 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
                   children: [
                     Text(
                       'Vestuario',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
                     ),
                     Text(
                       'Los mensajes se borran solos a las 24 horas (máx. 40).',
@@ -799,14 +938,18 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
         ),
         Expanded(
           child: StreamBuilder<DocumentSnapshot>(
-            stream: FirebaseFirestore.instance.collection('partidos').doc('actual_chat').snapshots(),
+            stream: FirebaseFirestore.instance
+                .collection('partidos')
+                .doc('actual_chat')
+                .snapshots(),
             builder: (ctx, snap) {
               if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }
 
               final data = snap.data?.data() as Map<String, dynamic>? ?? {};
-              final limite24hs = DateTime.now().subtract(const Duration(hours: 24)).millisecondsSinceEpoch;
+              final limite24hs =
+                  DateTime.now().subtract(const Duration(hours: 24)).millisecondsSinceEpoch;
               final List<dynamic> rawMensajes = (data['mensajes'] as List<dynamic>? ?? []);
 
               final List<dynamic> mensajes = [];
@@ -826,11 +969,16 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.mark_chat_unread_outlined, size: 48, color: Colors.grey.shade600),
+                        Icon(Icons.mark_chat_unread_outlined,
+                            size: 48, color: Colors.grey.shade600),
                         const SizedBox(height: 12),
                         const Text(
                           'El vestuario está tranquilo',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white70),
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white70,
+                          ),
                         ),
                         const SizedBox(height: 6),
                         const Text(
@@ -864,7 +1012,8 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
                   String horaFormateada = '';
                   if (ts != null) {
                     final dt = DateTime.fromMillisecondsSinceEpoch(ts);
-                    horaFormateada = '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+                    horaFormateada =
+                        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
                   }
 
                   return Align(
@@ -872,7 +1021,9 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
                     child: Container(
                       margin: const EdgeInsets.symmetric(vertical: 4),
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+                      constraints: BoxConstraints(
+                        maxWidth: MediaQuery.of(context).size.width * 0.78,
+                      ),
                       decoration: BoxDecoration(
                         color: esMio ? const Color(0xFF0F5132) : const Color(0xFF16253B),
                         borderRadius: BorderRadius.only(
@@ -882,7 +1033,9 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
                           bottomRight: Radius.circular(esMio ? 2 : 14),
                         ),
                         border: Border.all(
-                          color: esMio ? Colors.tealAccent.withValues(alpha: 0.3) : Colors.white10,
+                          color: esMio
+                              ? Colors.tealAccent.withValues(alpha: 0.3)
+                              : Colors.white10,
                         ),
                       ),
                       child: Column(
@@ -902,7 +1055,11 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
                             ),
                           Text(
                             texto,
-                            style: const TextStyle(fontSize: 14, color: Colors.white, height: 1.3),
+                            style: const TextStyle(
+                              fontSize: 14,
+                              color: Colors.white,
+                              height: 1.3,
+                            ),
                           ),
                           if (horaFormateada.isNotEmpty)
                             Align(
@@ -913,7 +1070,9 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
                                   horaFormateada,
                                   style: TextStyle(
                                     fontSize: 10,
-                                    color: esMio ? Colors.tealAccent.withValues(alpha: 0.7) : Colors.grey,
+                                    color: esMio
+                                        ? Colors.tealAccent.withValues(alpha: 0.7)
+                                        : Colors.grey,
                                   ),
                                 ),
                               ),
@@ -933,7 +1092,9 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
               color: const Color(0xFF101C2B),
-              border: Border(top: BorderSide(color: Colors.white.withValues(alpha: 0.08))),
+              border: Border(
+                top: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+              ),
             ),
             child: Row(
               children: [
@@ -966,7 +1127,10 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
                       ? const SizedBox(
                           width: 18,
                           height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.black,
+                          ),
                         )
                       : const Icon(Icons.send, size: 18),
                   onPressed: _enviando ? null : _enviarMensaje,
@@ -983,6 +1147,7 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
 // ============================================================================
 // PANTALLA PRINCIPAL
 // ============================================================================
+
 class PantallaPrincipal extends StatefulWidget {
   final String nombreJugador;
   final String emailJugador;
@@ -1005,18 +1170,26 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
   int _indiceActual = 0;
   String? _ultimoRecordatorioProgramado;
   bool _verificandoSemana = false;
-  DateTime? _ultimaAlertaNotificada;
+  DateTime _ultimaAlertaNotificada = DateTime.now();
+  DateTime _ultimoRegistroNotificado = DateTime.now();
+  DateTime _ultimoCambioAsistenciaNotificado = DateTime.now();
+  DateTime _ultimoVestuarioNotificado = DateTime.now();
 
   @override
   void initState() {
     super.initState();
+    _ultimaAlertaNotificada = DateTime.now();
+    _ultimoRegistroNotificado = DateTime.now();
+    _ultimoCambioAsistenciaNotificado = DateTime.now();
+    _ultimoVestuarioNotificado = DateTime.now();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       verificarActualizacionGitHub(context);
     });
   }
 
   bool get _esAdmin =>
-      kBypassLogin || widget.emailJugador.toLowerCase().trim() == kSuperAdminEmail.toLowerCase().trim();
+      kBypassLogin ||
+      widget.emailJugador.toLowerCase().trim() == kSuperAdminEmail.toLowerCase().trim();
 
   String? get _fotoUrlConProxy {
     if (widget.fotoUrl == null || widget.fotoUrl!.isEmpty) return null;
@@ -1024,15 +1197,19 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
   }
 
   void _revisarProgramacionRecordatorio(Map<String, dynamic> datosPartido) {
-    final int? millis = datosPartido['recordatorioMillis'];
-    final String partidoTexto = "${datosPartido['dia'] ?? ''} a las ${datosPartido['hora'] ?? ''}".trim();
+    final int? millis = datosPartido['recordatorioMillis'] as int?;
+    final String partidoTexto =
+        '${datosPartido['dia'] ?? ''} a las ${datosPartido['hora'] ?? ''}'.trim();
 
     if (millis != null) {
       final key = '$millis-$partidoTexto';
       if (_ultimoRecordatorioProgramado != key) {
         _ultimoRecordatorioProgramado = key;
         final dt = DateTime.fromMillisecondsSinceEpoch(millis);
-        programarRecordatorioAsistencia(fechaHora: dt, partidoTexto: partidoTexto);
+        programarRecordatorioAsistencia(
+          fechaHora: dt,
+          partidoTexto: partidoTexto,
+        );
       }
     }
   }
@@ -1042,20 +1219,26 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
 
     DateTime? fechaPartido;
     if (datosPartido['fechaMillis'] != null) {
-      fechaPartido = DateTime.fromMillisecondsSinceEpoch(datosPartido['fechaMillis'] as int);
+      fechaPartido =
+          DateTime.fromMillisecondsSinceEpoch(datosPartido['fechaMillis'] as int);
     } else if (datosPartido['dia'] != null) {
       fechaPartido = _parsearFechaEspanol(datosPartido['dia'].toString());
     }
 
     if (fechaPartido == null) return;
 
-    final limiteExpiracion = DateTime(fechaPartido.year, fechaPartido.month, fechaPartido.day + 1);
+    final limiteExpiracion =
+        DateTime(fechaPartido.year, fechaPartido.month, fechaPartido.day + 1);
 
     if (DateTime.now().isAfter(limiteExpiracion)) {
       _verificandoSemana = true;
       try {
         DateTime nuevaFecha = fechaPartido.add(const Duration(days: 7));
-        while (DateTime(nuevaFecha.year, nuevaFecha.month, nuevaFecha.day + 1).isBefore(DateTime.now())) {
+        while (DateTime(
+                nuevaFecha.year,
+                nuevaFecha.month,
+                nuevaFecha.day + 1)
+            .isBefore(DateTime.now())) {
           nuevaFecha = nuevaFecha.add(const Duration(days: 7));
         }
 
@@ -1099,7 +1282,10 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
             style: FilledButton.styleFrom(backgroundColor: Colors.amber.shade900),
             onPressed: () async {
               Navigator.pop(ctx);
-              await FirebaseFirestore.instance.collection('partidos').doc('actual').update({
+              await FirebaseFirestore.instance
+                  .collection('partidos')
+                  .doc('actual')
+                  .update({
                 'asistencia': FieldValue.delete(),
                 'ultimaAlerta': FieldValue.delete(),
               });
@@ -1126,21 +1312,25 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
     );
   }
 
-  void _mostrarDialogoConfiguracion(BuildContext context, Map<String, dynamic> datosActuales) {
+  void _mostrarDialogoConfiguracion(
+    BuildContext context,
+    Map<String, dynamic> datosActuales,
+  ) {
     final diaCtrl = TextEditingController(text: datosActuales['dia'] ?? 'Viernes 30 de Octubre');
     final horaCtrl = TextEditingController(text: datosActuales['hora'] ?? '20:00 hs');
     final lugarCtrl = TextEditingController(text: datosActuales['lugar'] ?? 'Estación 98 - Cancha 2');
+    final mapsUrlCtrl = TextEditingController(text: datosActuales['mapsUrl'] ?? '');
     final cupoCtrl = TextEditingController(text: '${datosActuales['cupoMaximo'] ?? 10}');
 
     final recDiaCtrl = TextEditingController(text: datosActuales['recordatorioDia'] ?? 'Jueves anterior');
     final recHoraCtrl = TextEditingController(text: datosActuales['recordatorioHora'] ?? '10:00 hs');
 
     DateTime fechaPartidoSeleccionada = datosActuales['fechaMillis'] != null
-        ? DateTime.fromMillisecondsSinceEpoch(datosActuales['fechaMillis'])
+        ? DateTime.fromMillisecondsSinceEpoch(datosActuales['fechaMillis'] as int)
         : (_parsearFechaEspanol(datosActuales['dia'] ?? '') ?? DateTime.now());
 
     DateTime fechaRecordatorioSeleccionada = datosActuales['recordatorioMillis'] != null
-        ? DateTime.fromMillisecondsSinceEpoch(datosActuales['recordatorioMillis'])
+        ? DateTime.fromMillisecondsSinceEpoch(datosActuales['recordatorioMillis'] as int)
         : DateTime.now().add(const Duration(days: 1));
     TimeOfDay horaRecordatorioSeleccionada = const TimeOfDay(hour: 10, minute: 0);
 
@@ -1203,14 +1393,27 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                 TextField(
                   controller: lugarCtrl,
                   decoration: const InputDecoration(
-                      labelText: 'Cancha / Dirección', prefixIcon: Icon(Icons.location_on_outlined, size: 20)),
+                    labelText: 'Cancha / Dirección',
+                    prefixIcon: Icon(Icons.location_on_outlined, size: 20),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: mapsUrlCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Link de Google Maps',
+                    prefixIcon: Icon(Icons.map_outlined, size: 20),
+                    hintText: 'https://maps.google.com/...',
+                  ),
                 ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: cupoCtrl,
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(
-                      labelText: 'Cupo Total de Jugadores', prefixIcon: Icon(Icons.people_alt_outlined, size: 20)),
+                    labelText: 'Cupo Total de Jugadores',
+                    prefixIcon: Icon(Icons.people_alt_outlined, size: 20),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 const Divider(),
@@ -1218,8 +1421,14 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                   children: [
                     Icon(Icons.alarm, color: Colors.tealAccent, size: 18),
                     SizedBox(width: 8),
-                    Text('Recordatorio de Confirmación',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.tealAccent)),
+                    Text(
+                      'Recordatorio de Confirmación',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.tealAccent,
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -1273,8 +1482,9 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancelar', style: TextStyle(color: Colors.grey))),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar', style: TextStyle(color: Colors.grey)),
+            ),
             FilledButton(
               onPressed: () async {
                 final cupoInt = int.tryParse(cupoCtrl.text) ?? 10;
@@ -1291,6 +1501,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                   'fechaMillis': fechaPartidoSeleccionada.millisecondsSinceEpoch,
                   'hora': horaCtrl.text.trim(),
                   'lugar': lugarCtrl.text.trim(),
+                  'mapsUrl': mapsUrlCtrl.text.trim(),
                   'cupoMaximo': cupoInt,
                   'recordatorioDia': recDiaCtrl.text.trim(),
                   'recordatorioHora': recHoraCtrl.text.trim(),
@@ -1312,12 +1523,14 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('partidos').doc('actual').snapshots(),
       builder: (context, snapshotPartido) {
-        final infoPartido = (snapshotPartido.data?.data() as Map<String, dynamic>?) ?? {
-          'dia': 'Viernes 30 de Octubre',
-          'hora': '20:00 hs',
-          'lugar': 'Estación 98 - Cancha 2',
-          'cupoMaximo': 10,
-        };
+        final infoPartido = (snapshotPartido.data?.data() as Map<String, dynamic>?) ??
+            {
+              'dia': 'Viernes 30 de Octubre',
+              'hora': '20:00 hs',
+              'lugar': 'Estación 98 - Cancha 2',
+              'mapsUrl': '',
+              'cupoMaximo': 10,
+            };
 
         _revisarProgramacionRecordatorio(infoPartido);
         _verificarYActualizarSemanaPartido(infoPartido);
@@ -1330,6 +1543,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
 
             if (snapshotPlantel.hasData && snapshotPlantel.data!.exists) {
               final data = snapshotPlantel.data!.data() as Map<String, dynamic>?;
+
               if (data != null) {
                 if (data['titulares'] != null) {
                   titulares = (data['titulares'] as List)
@@ -1354,25 +1568,137 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
 
             if (_esAdmin && infoPartido['ultimaAlerta'] != null) {
               final alerta = infoPartido['ultimaAlerta'];
-              final ts = (alerta['timestamp'] as Timestamp?)?.toDate();
-              if (ts != null && (_ultimaAlertaNotificada == null || ts.isAfter(_ultimaAlertaNotificada!))) {
-                _ultimaAlertaNotificada = ts;
-                if (ts.isAfter(DateTime.now().subtract(const Duration(minutes: 5))) &&
-                    !sonElMismoJugador(alerta['nombre'] ?? '', aliasUsuario)) {
+              if (alerta is Map<String, dynamic>) {
+                final ts = (alerta['timestamp'] as Timestamp?)?.toDate();
+                if (ts != null && ts.isAfter(_ultimaAlertaNotificada)) {
+                  _ultimaAlertaNotificada = ts;
+                  final String nombreAlerta = (alerta['nombre'] ?? '').toString();
+                  if (!sonElMismoJugador(nombreAlerta, aliasUsuario)) {
+                    mostrarNotificacion(
+                      id: 101,
+                      titulo: '⚠️ Jugador dado de baja',
+                      cuerpo: '$nombreAlerta avisó que no juega este partido.',
+                    );
+                  }
+                }
+              }
+            }
+
+            if (_esAdmin && infoPartido['alertaNuevoUsuario'] != null) {
+              final alertaReg = infoPartido['alertaNuevoUsuario'];
+              if (alertaReg is Map<String, dynamic>) {
+                final ts = (alertaReg['timestamp'] as Timestamp?)?.toDate();
+                if (ts != null && ts.isAfter(_ultimoRegistroNotificado)) {
+                  _ultimoRegistroNotificado = ts;
+                  final regEmail =
+                      (alertaReg['email'] ?? '').toString().toLowerCase().trim();
+                  if (regEmail != widget.emailJugador.toLowerCase().trim()) {
+                    mostrarNotificacion(
+                      id: 102,
+                      titulo: '👤 Nuevo registro en Fulbito',
+                      cuerpo:
+                          '${alertaReg['nombre']} ($regEmail) se acaba de registrar en la app.',
+                    );
+                    if (kIsWeb && mounted) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                '👤 Nuevo registro: ${alertaReg['nombre']} ($regEmail)',
+                              ),
+                              backgroundColor: Colors.teal,
+                            ),
+                          );
+                        }
+                      });
+                    }
+                  }
+                }
+              }
+            }
+
+            if (_esAdmin && infoPartido['alertaCambioAsistencia'] != null) {
+              final alerta = infoPartido['alertaCambioAsistencia'];
+              if (alerta is Map<String, dynamic>) {
+                final ts = (alerta['timestamp'] as Timestamp?)?.toDate();
+                if (ts != null && ts.isAfter(_ultimoCambioAsistenciaNotificado)) {
+                  _ultimoCambioAsistenciaNotificado = ts;
+                  final nombre = (alerta['nombre'] ?? '').toString();
+                  final tipo = (alerta['tipo'] ?? '').toString();
+
+                  if (tipo == 'confirmado') {
+                    mostrarNotificacion(
+                      id: 103,
+                      titulo: '✅ Confirmación de asistencia',
+                      cuerpo: '$nombre confirmó que va a jugar este partido.',
+                    );
+                  } else if (tipo == 'baja') {
+                    mostrarNotificacion(
+                      id: 104,
+                      titulo: '⚠️ Baja registrada',
+                      cuerpo: '$nombre se bajó del partido.',
+                    );
+                  }
+
+                  if (kIsWeb && mounted) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            tipo == 'confirmado'
+                                ? '✅ $nombre confirmó asistencia.'
+                                : '⚠️ $nombre se dio de baja.',
+                          ),
+                          backgroundColor:
+                              tipo == 'confirmado' ? Colors.green : Colors.orange,
+                        ),
+                      );
+                    });
+                  }
+                }
+              }
+            }
+
+            if (_esAdmin && infoPartido['alertaVestuario'] != null) {
+              final aviso = infoPartido['alertaVestuario'];
+              if (aviso is Map<String, dynamic>) {
+                final ts = (aviso['timestamp'] as Timestamp?)?.toDate();
+                if (ts != null && ts.isAfter(_ultimoVestuarioNotificado)) {
+                  _ultimoVestuarioNotificado = ts;
+                  final nombre = (aviso['nombre'] ?? '').toString();
+                  final texto = (aviso['texto'] ?? '').toString();
+
                   mostrarNotificacion(
-                    id: 101,
-                    titulo: '⚠️ Jugador dado de baja',
-                    cuerpo: '${alerta['nombre']} avisó que no juega este partido.',
+                    id: 105,
+                    titulo: '💬 Mensaje en vestuario',
+                    cuerpo: '$nombre: $texto',
                   );
+
+                  if (kIsWeb && mounted) {
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('💬 $nombre escribió en el vestuario'),
+                          backgroundColor: Colors.teal,
+                        ),
+                      );
+                    });
+                  }
                 }
               }
             }
 
             final bool esModerador = _esAdmin ||
-                todos.any((j) =>
-                    j.esModerador &&
-                    (j.email.toLowerCase().trim() == widget.emailJugador.toLowerCase().trim() ||
-                        sonElMismoJugador(j.nombre, aliasUsuario)));
+                todos.any(
+                  (j) =>
+                      j.esModerador &&
+                      (j.email.toLowerCase().trim() ==
+                              widget.emailJugador.toLowerCase().trim() ||
+                          sonElMismoJugador(j.nombre, aliasUsuario)),
+                );
 
             final List<Widget> pantallas = [
               ConvocatoriaScreen(
@@ -1395,9 +1721,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                 suplentes: suplentes,
                 onAbrirGestionPlantel: () => _abrirGestionPlantel(context),
               ),
-              VestuarioScreen(
-                aliasUsuario: aliasUsuario,
-              ),
+              VestuarioScreen(aliasUsuario: aliasUsuario),
             ];
 
             return Scaffold(
@@ -1405,10 +1729,14 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                 leading: const Padding(
                   padding: EdgeInsets.all(8.0),
                   child: CircleAvatar(
-                      backgroundColor: Colors.white, backgroundImage: AssetImage('assets/logo.jpg')),
+                    backgroundColor: Colors.white,
+                    backgroundImage: AssetImage('assets/logo.jpg'),
+                  ),
                 ),
-                title: const Text('S.V.F.C. Oficial',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                title: const Text(
+                  'S.V.F.C. Oficial',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                ),
                 actions: [
                   PopupMenuButton<String>(
                     icon: CircleAvatar(
@@ -1446,31 +1774,54 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                           children: [
                             Row(
                               children: [
-                                Text(aliasUsuario,
-                                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                                Text(
+                                  aliasUsuario,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
                                 const SizedBox(width: 6),
                                 if (_esAdmin)
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                    padding:
+                                        const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                                     decoration: BoxDecoration(
-                                        color: Colors.amber.shade800, borderRadius: BorderRadius.circular(4)),
-                                    child: const Text('ADMIN',
-                                        style: TextStyle(
-                                            fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white)),
+                                      color: Colors.amber.shade800,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      'ADMIN',
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
                                   )
                                 else if (esModerador)
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                    padding:
+                                        const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                                     decoration: BoxDecoration(
-                                        color: Colors.teal.shade800, borderRadius: BorderRadius.circular(4)),
-                                    child: const Text('MODERADOR',
-                                        style: TextStyle(
-                                            fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white)),
+                                      color: Colors.teal.shade800,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      'MODERADOR',
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
                                   ),
                               ],
                             ),
-                            Text(widget.emailJugador,
-                                style: TextStyle(fontSize: 12, color: Colors.grey[400])),
+                            Text(
+                              widget.emailJugador,
+                              style: TextStyle(fontSize: 12, color: Colors.grey[400]),
+                            ),
                           ],
                         ),
                       ),
@@ -1482,7 +1833,10 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                             children: [
                               Icon(Icons.people_alt, size: 18, color: Colors.orangeAccent),
                               SizedBox(width: 8),
-                              Text('Gestionar Plantel', style: TextStyle(color: Colors.orangeAccent)),
+                              Text(
+                                'Gestionar Plantel',
+                                style: TextStyle(color: Colors.orangeAccent),
+                              ),
                             ],
                           ),
                         ),
@@ -1492,7 +1846,10 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                             children: [
                               Icon(Icons.settings, size: 18, color: Colors.lightBlueAccent),
                               SizedBox(width: 8),
-                              Text('Configurar partido', style: TextStyle(color: Colors.lightBlueAccent)),
+                              Text(
+                                'Configurar partido',
+                                style: TextStyle(color: Colors.lightBlueAccent),
+                              ),
                             ],
                           ),
                         ),
@@ -1502,7 +1859,10 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                             children: [
                               Icon(Icons.restart_alt, size: 18, color: Colors.amberAccent),
                               SizedBox(width: 8),
-                              Text('Resetear convocatoria', style: TextStyle(color: Colors.amberAccent)),
+                              Text(
+                                'Resetear convocatoria',
+                                style: TextStyle(color: Colors.amberAccent),
+                              ),
                             ],
                           ),
                         ),
@@ -1539,21 +1899,25 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                 onDestinationSelected: (int index) => setState(() => _indiceActual = index),
                 destinations: const [
                   NavigationDestination(
-                      icon: Icon(Icons.sports_soccer_outlined),
-                      selectedIcon: Icon(Icons.sports_soccer),
-                      label: 'Partido'),
+                    icon: Icon(Icons.sports_soccer_outlined),
+                    selectedIcon: Icon(Icons.sports_soccer),
+                    label: 'Partido',
+                  ),
                   NavigationDestination(
-                      icon: Icon(Icons.leaderboard_outlined),
-                      selectedIcon: Icon(Icons.leaderboard),
-                      label: 'Tabla'),
+                    icon: Icon(Icons.leaderboard_outlined),
+                    selectedIcon: Icon(Icons.leaderboard),
+                    label: 'Tabla',
+                  ),
                   NavigationDestination(
-                      icon: Icon(Icons.sync_alt_outlined),
-                      selectedIcon: Icon(Icons.sync_alt),
-                      label: 'Rotación'),
+                    icon: Icon(Icons.sync_alt_outlined),
+                    selectedIcon: Icon(Icons.sync_alt),
+                    label: 'Rotación',
+                  ),
                   NavigationDestination(
-                      icon: Icon(Icons.forum_outlined),
-                      selectedIcon: Icon(Icons.forum),
-                      label: 'Vestuario'),
+                    icon: Icon(Icons.forum_outlined),
+                    selectedIcon: Icon(Icons.forum),
+                    label: 'Vestuario',
+                  ),
                 ],
               ),
             );
@@ -1567,6 +1931,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
 // ============================================================================
 // GESTIÓN DE PLANTEL
 // ============================================================================
+
 class GestionPlantelScreen extends StatefulWidget {
   const GestionPlantelScreen({super.key});
 
@@ -1577,6 +1942,7 @@ class GestionPlantelScreen extends StatefulWidget {
 class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
   List<Jugador> _titulares = [];
   List<Jugador> _suplentes = [];
+  List<Map<String, dynamic>> _usuariosRegistrados = [];
   bool _cargando = true;
   bool _guardando = false;
 
@@ -1587,21 +1953,33 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
   }
 
   Future<void> _cargarDatos() async {
-    final doc = await FirebaseFirestore.instance.collection('config').doc('plantel').get();
-    if (doc.exists && doc.data() != null) {
-      final data = doc.data()!;
-      if (data['titulares'] != null) {
-        _titulares = (data['titulares'] as List)
-            .map((e) => Jugador.fromMap(Map<String, dynamic>.from(e)))
-            .toList();
+    try {
+      final doc = await FirebaseFirestore.instance.collection('config').doc('plantel').get();
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data()!;
+        if (data['titulares'] != null) {
+          _titulares = (data['titulares'] as List)
+              .map((e) => Jugador.fromMap(Map<String, dynamic>.from(e)))
+              .toList();
+        }
+        if (data['suplentes'] != null) {
+          _suplentes = (data['suplentes'] as List)
+              .map((e) => Jugador.fromMap(Map<String, dynamic>.from(e)))
+              .toList();
+        }
       }
-      if (data['suplentes'] != null) {
-        _suplentes = (data['suplentes'] as List)
-            .map((e) => Jugador.fromMap(Map<String, dynamic>.from(e)))
-            .toList();
-      }
+
+      final usersSnap = await FirebaseFirestore.instance.collection('usuarios').get();
+      _usuariosRegistrados = usersSnap.docs
+          .map((d) => Map<String, dynamic>.from(d.data()))
+          .toList();
+    } catch (e) {
+      debugPrint('Error al cargar datos del plantel: $e');
     }
-    setState(() => _cargando = false);
+
+    if (mounted) {
+      setState(() => _cargando = false);
+    }
   }
 
   Future<void> _guardarEnFirestore() async {
@@ -1614,7 +1992,10 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
     setState(() => _guardando = false);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Plantel guardado con éxito.'), backgroundColor: Colors.teal),
+        const SnackBar(
+          content: Text('Plantel guardado con éxito.'),
+          backgroundColor: Colors.teal,
+        ),
       );
     }
   }
@@ -1635,7 +2016,10 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
             children: [
               TextField(
                 controller: nombreCtrl,
-                decoration: const InputDecoration(labelText: 'Nombre o Apodo', hintText: 'Ej: Nico'),
+                decoration: const InputDecoration(
+                  labelText: 'Nombre o Apodo',
+                  hintText: 'Ej: Nico',
+                ),
               ),
               const SizedBox(height: 16),
               Wrap(
@@ -1665,8 +2049,9 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancelar', style: TextStyle(color: Colors.grey))),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar', style: TextStyle(color: Colors.grey)),
+            ),
             FilledButton(
               onPressed: () {
                 final nombre = nombreCtrl.text.trim();
@@ -1693,9 +2078,30 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
 
   void _dialogoAsociarCuenta(Jugador jugador) async {
     final snapshot = await FirebaseFirestore.instance.collection('usuarios').get();
-    final usuariosRegistrados = snapshot.docs.map((d) => d.data()).toList();
+    final todosLosUsuarios = snapshot.docs
+        .map((d) => Map<String, dynamic>.from(d.data()))
+        .toList();
 
     if (!mounted) return;
+
+    final emailsOcupados = [..._titulares, ..._suplentes]
+        .where((j) => j != jugador)
+        .map((j) => j.email.toLowerCase().trim())
+        .where((e) => e.isNotEmpty)
+        .toSet();
+    final uidsOcupados = [..._titulares, ..._suplentes]
+        .where((j) => j != jugador)
+        .map((j) => j.uid.trim())
+        .where((u) => u.isNotEmpty)
+        .toSet();
+
+    final usuariosDisponibles = todosLosUsuarios.where((u) {
+      final email = (u['email'] ?? '').toString().toLowerCase().trim();
+      final uid = (u['uid'] ?? '').toString().trim();
+      if (email.isNotEmpty && emailsOcupados.contains(email)) return false;
+      if (uid.isNotEmpty && uidsOcupados.contains(uid)) return false;
+      return true;
+    }).toList();
 
     showDialog(
       context: context,
@@ -1703,31 +2109,49 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
         title: Text('Asociar a "${jugador.nombre}"'),
         content: SizedBox(
           width: double.maxFinite,
-          child: usuariosRegistrados.isEmpty
-              ? const Text(
-                  'Aún no hay usuarios de Google registrados. Se registran automáticamente al iniciar sesión.')
+          child: usuariosDisponibles.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16.0),
+                  child: Text(
+                    'No hay cuentas registradas libres para vincular.',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                )
               : ListView.builder(
                   shrinkWrap: true,
-                  itemCount: usuariosRegistrados.length,
+                  itemCount: usuariosDisponibles.length,
                   itemBuilder: (context, index) {
-                    final u = usuariosRegistrados[index];
-                    final String email = u['email'] ?? '';
-                    final String nombreGoogle = u['nombre'] ?? '';
-                    final esEste = jugador.email == email && email.isNotEmpty;
+                    final u = usuariosDisponibles[index];
+                    final String email = (u['email'] ?? '').toString();
+                    final String nombreMostrar = nombreLegibleUsuario(u);
+                    final bool esEste =
+                        jugador.email.toLowerCase().trim() == email.toLowerCase().trim() &&
+                            email.isNotEmpty;
 
                     return ListTile(
                       dense: true,
                       leading: CircleAvatar(
                         backgroundColor: Colors.white10,
-                        child: Text(nombreGoogle.isNotEmpty ? nombreGoogle[0].toUpperCase() : 'U'),
+                        child: Text(
+                          nombreMostrar.isNotEmpty ? nombreMostrar[0].toUpperCase() : 'U',
+                        ),
                       ),
-                      title: Text(nombreGoogle),
-                      subtitle: Text(email, style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                      trailing: esEste ? const Icon(Icons.check_circle, color: Colors.greenAccent) : null,
+                      title: Text(nombreMostrar),
+                      subtitle: Text(
+                        email,
+                        style: const TextStyle(fontSize: 11, color: Colors.grey),
+                      ),
+                      trailing: esEste
+                          ? const Icon(Icons.check_circle, color: Colors.greenAccent)
+                          : null,
                       onTap: () {
                         setState(() {
                           jugador.email = email;
-                          jugador.uid = u['uid'] ?? '';
+                          jugador.uid = (u['uid'] ?? '').toString();
+                          if (jugador.nombre.trim().isEmpty ||
+                              jugador.nombre.toLowerCase().contains('jugador')) {
+                            jugador.nombre = nombreMostrar;
+                          }
                         });
                         _guardarEnFirestore();
                         Navigator.pop(ctx);
@@ -1755,6 +2179,70 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
     );
   }
 
+  void _dialogoVincularAUnoExistente(
+    String nombreGoogle,
+    String emailGoogle,
+    String uidGoogle,
+  ) {
+    final sinVincular = [..._titulares, ..._suplentes]
+        .where((j) => j.email.isEmpty)
+        .toList();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Vincular "$nombreGoogle" con:'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: sinVincular.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8.0),
+                  child: Text(
+                    'Todos los jugadores del plantel ya tienen una cuenta vinculada.',
+                  ),
+                )
+              : ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: sinVincular.length,
+                  itemBuilder: (context, index) {
+                    final j = sinVincular[index];
+                    final bool esTit = _titulares.contains(j);
+                    return ListTile(
+                      dense: true,
+                      leading: Icon(
+                        Icons.person,
+                        color: esTit ? Colors.greenAccent : Colors.orangeAccent,
+                      ),
+                      title: Text(
+                        j.nombre,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Text(
+                        esTit ? 'Titular' : 'Suplente',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: esTit ? Colors.greenAccent : Colors.orangeAccent,
+                        ),
+                      ),
+                      onTap: () {
+                        setState(() {
+                          j.email = emailGoogle;
+                          j.uid = uidGoogle;
+                        });
+                        _guardarEnFirestore();
+                        Navigator.pop(ctx);
+                      },
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+        ],
+      ),
+    );
+  }
+
   Widget _buildBotonAccion({
     required IconData icon,
     required Color color,
@@ -1777,15 +2265,41 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final todosPlantel = [..._titulares, ..._suplentes];
+    final emailsAsociados = todosPlantel
+        .map((j) => j.email.toLowerCase().trim())
+        .where((e) => e.isNotEmpty)
+        .toSet();
+    final uidsAsociados = todosPlantel
+        .map((j) => j.uid.trim())
+        .where((u) => u.isNotEmpty)
+        .toSet();
+
+    final noAsociados = _usuariosRegistrados.where((u) {
+      final email = (u['email'] ?? '').toString().toLowerCase().trim();
+      final uid = (u['uid'] ?? '').toString().trim();
+      return !emailsAsociados.contains(email) &&
+          (uid.isEmpty || !uidsAsociados.contains(uid));
+    }).toList();
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Gestión de Plantel', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        title: const Text(
+          'Gestión de Plantel',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
         actions: [
           if (_guardando)
             const Center(
-                child: Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))))
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            )
           else
             IconButton(
               icon: const Icon(Icons.save, color: Colors.lightBlueAccent),
@@ -1809,16 +2323,29 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
                     icon: const Icon(Icons.person_add),
-                    label: const Text('Agregar Nuevo Jugador', style: TextStyle(fontWeight: FontWeight.bold)),
+                    label: const Text(
+                      'Agregar Nuevo Jugador',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ),
                   const SizedBox(height: 20),
+
+                  // Titulares
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('Titulares en Rotación (${_titulares.length})',
-                          style: const TextStyle(
-                              fontSize: 16, fontWeight: FontWeight.bold, color: Colors.greenAccent)),
-                      const Text('Arriba = más prioridad', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                      Text(
+                        'Titulares en Rotación (${_titulares.length})',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.greenAccent,
+                        ),
+                      ),
+                      const Text(
+                        'Arriba = más prioridad',
+                        style: TextStyle(fontSize: 11, color: Colors.grey),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 6),
@@ -1828,8 +2355,11 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                       child: const Padding(
                         padding: EdgeInsets.all(16.0),
                         child: Center(
-                            child: Text('No hay titulares cargados. Usá el botón para agregarlos.',
-                                style: TextStyle(color: Colors.grey))),
+                          child: Text(
+                            'No hay titulares cargados. Usá el botón para agregarlos.',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        ),
                       ),
                     )
                   else
@@ -1849,10 +2379,16 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                             contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                             leading: CircleAvatar(
                               radius: 12,
-                              backgroundColor: index < 10 ? Colors.green.shade800 : Colors.red.shade900,
-                              child: Text('${index + 1}',
-                                  style: const TextStyle(
-                                      fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white)),
+                              backgroundColor:
+                                  index < 10 ? Colors.green.shade800 : Colors.red.shade900,
+                              child: Text(
+                                '${index + 1}',
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
                             ),
                             title: Row(
                               mainAxisSize: MainAxisSize.min,
@@ -1869,10 +2405,17 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                                     decoration: BoxDecoration(
-                                        color: Colors.teal.shade800, borderRadius: BorderRadius.circular(4)),
-                                    child: const Text('MOD',
-                                        style: TextStyle(
-                                            fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white)),
+                                      color: Colors.teal.shade800,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      'MOD',
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
                                   ),
                                 ],
                               ],
@@ -1882,7 +2425,9 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                  fontSize: 10, color: vinculado ? Colors.greenAccent : Colors.grey),
+                                fontSize: 10,
+                                color: vinculado ? Colors.greenAccent : Colors.grey,
+                              ),
                             ),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
@@ -1929,15 +2474,27 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                         );
                       },
                     ),
+
                   const SizedBox(height: 24),
-                  Text('Suplentes / Reservas (${_suplentes.length})',
-                      style: const TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold, color: Colors.orangeAccent)),
+
+                  // Suplentes
+                  Text(
+                    'Suplentes / Reservas (${_suplentes.length})',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.orangeAccent,
+                    ),
+                  ),
                   const SizedBox(height: 6),
                   if (_suplentes.isEmpty)
                     const Padding(
-                        padding: EdgeInsets.all(8.0),
-                        child: Text('No hay suplentes cargados.', style: TextStyle(color: Colors.grey)))
+                      padding: EdgeInsets.all(8.0),
+                      child: Text(
+                        'No hay suplentes cargados.',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    )
                   else
                     ListView.builder(
                       shrinkWrap: true,
@@ -1973,10 +2530,17 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                                     decoration: BoxDecoration(
-                                        color: Colors.teal.shade800, borderRadius: BorderRadius.circular(4)),
-                                    child: const Text('MOD',
-                                        style: TextStyle(
-                                            fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white)),
+                                      color: Colors.teal.shade800,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      'MOD',
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
                                   ),
                                 ],
                               ],
@@ -1986,7 +2550,9 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                  fontSize: 10, color: vinculado ? Colors.greenAccent : Colors.grey),
+                                fontSize: 10,
+                                color: vinculado ? Colors.greenAccent : Colors.grey,
+                              ),
                             ),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
@@ -2033,7 +2599,154 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                         );
                       },
                     ),
-                  const SizedBox(height: 24),
+
+                  const Divider(height: 32),
+
+                  // Cuentas sin asociar
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Cuentas Registradas Sin Vincular (${noAsociados.length})',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.cyanAccent,
+                        ),
+                      ),
+                      if (noAsociados.isNotEmpty)
+                        Text(
+                          '${noAsociados.length} pendientes',
+                          style: const TextStyle(fontSize: 11, color: Colors.grey),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  if (noAsociados.isEmpty)
+                    Card(
+                      color: Colors.white.withValues(alpha: 0.02),
+                      child: const Padding(
+                        padding: EdgeInsets.all(16.0),
+                        child: Center(
+                          child: Text(
+                            'Todas las cuentas registradas están vinculadas al plantel.',
+                            style: TextStyle(color: Colors.grey, fontSize: 12),
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: noAsociados.length,
+                      itemBuilder: (context, index) {
+                        final u = noAsociados[index];
+                        final String nombreMostrar = nombreLegibleUsuario(u);
+                        final String emailGoogle = (u['email'] ?? '').toString();
+                        final String uidGoogle = (u['uid'] ?? '').toString();
+                        final String? fotoUrl = u['fotoUrl']?.toString();
+
+                        return Card(
+                          margin: const EdgeInsets.symmetric(vertical: 3),
+                          color: Colors.cyanAccent.withValues(alpha: 0.05),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            side: BorderSide(color: Colors.cyanAccent.withValues(alpha: 0.2)),
+                          ),
+                          child: ListTile(
+                            dense: true,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                            leading: CircleAvatar(
+                              radius: 14,
+                              backgroundColor: Colors.white12,
+                              backgroundImage: (fotoUrl != null && fotoUrl.isNotEmpty)
+                                  ? NetworkImage(
+                                      'https://images.weserv.nl/?url=${Uri.encodeComponent(fotoUrl)}',
+                                    )
+                                  : null,
+                              child: (fotoUrl == null || fotoUrl.isEmpty)
+                                  ? Text(
+                                      nombreMostrar.isNotEmpty ? nombreMostrar[0].toUpperCase() : 'U',
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    )
+                                  : null,
+                            ),
+                            title: Text(
+                              nombreMostrar,
+                              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                            ),
+                            subtitle: Text(
+                              emailGoogle,
+                              style: const TextStyle(fontSize: 10, color: Colors.grey),
+                            ),
+                            trailing: PopupMenuButton<String>(
+                              icon: const Icon(Icons.more_vert, size: 18, color: Colors.cyanAccent),
+                              tooltip: 'Opciones de cuenta',
+                              onSelected: (val) {
+                                if (val == 'titular') {
+                                  setState(() {
+                                    _titulares.add(Jugador(
+                                      nombre: nombreMostrar,
+                                      email: emailGoogle,
+                                      uid: uidGoogle,
+                                    ));
+                                  });
+                                  _guardarEnFirestore();
+                                } else if (val == 'suplente') {
+                                  setState(() {
+                                    _suplentes.add(Jugador(
+                                      nombre: nombreMostrar,
+                                      email: emailGoogle,
+                                      uid: uidGoogle,
+                                    ));
+                                  });
+                                  _guardarEnFirestore();
+                                } else if (val == 'vincular') {
+                                  _dialogoVincularAUnoExistente(nombreMostrar, emailGoogle, uidGoogle);
+                                }
+                              },
+                              itemBuilder: (ctx) => const [
+                                PopupMenuItem(
+                                  value: 'vincular',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.link, size: 18, color: Colors.lightBlueAccent),
+                                      SizedBox(width: 8),
+                                      Text('Vincular a jugador existente...'),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'titular',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.add_circle_outline, size: 18, color: Colors.greenAccent),
+                                      SizedBox(width: 8),
+                                      Text('Agregar como Titular'),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'suplente',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.person_add_outlined, size: 18, color: Colors.orangeAccent),
+                                      SizedBox(width: 8),
+                                      Text('Agregar como Suplente'),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  const SizedBox(height: 32),
                 ],
               ),
             ),
@@ -2044,6 +2757,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
 // ============================================================================
 // CONVOCATORIA SCREEN
 // ============================================================================
+
 class ConvocatoriaScreen extends StatefulWidget {
   final String nombreJugador;
   final String emailJugador;
@@ -2072,6 +2786,11 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
   Future<void> _cambiarEstadoJugador(Jugador j, String nuevoEstado) async {
     await _db.collection('partidos').doc('actual').set({
       'asistencia': {j.nombre: nuevoEstado},
+      'alertaCambioAsistencia': {
+        'tipo': nuevoEstado,
+        'nombre': j.nombre,
+        'timestamp': FieldValue.serverTimestamp(),
+      },
       if (nuevoEstado == 'baja')
         'ultimaAlerta': {
           'tipo': 'baja',
@@ -2103,7 +2822,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
   }
 
   String _obtenerEstadoDeMapa(String nombre, Map<String, dynamic> asistencia) {
-    for (var k in asistencia.keys) {
+    for (final k in asistencia.keys) {
       if (sonElMismoJugador(k, nombre)) {
         return asistencia[k]?.toString() ?? 'pendiente';
       }
@@ -2116,6 +2835,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
     final dia = widget.infoPartido['dia'] ?? 'Viernes 30 de Octubre';
     final hora = widget.infoPartido['hora'] ?? '20:00 hs';
     final lugar = widget.infoPartido['lugar'] ?? 'Estación 98 - Cancha 2';
+    final String mapsUrl = (widget.infoPartido['mapsUrl'] ?? '').toString().trim();
     final int cupoMaximo = widget.infoPartido['cupoMaximo'] ?? 10;
     final Map<String, dynamic> asistencia =
         (widget.infoPartido['asistencia'] as Map<String, dynamic>?) ?? {};
@@ -2130,8 +2850,8 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
     final List<Jugador> prioritariosPendientes = [];
     final List<Jugador> prioritariosBajas = [];
 
-    for (var j in prioritarios) {
-      String estado = _obtenerEstadoDeMapa(j.nombre, asistencia);
+    for (final j in prioritarios) {
+      final String estado = _obtenerEstadoDeMapa(j.nombre, asistencia);
       if (estado == 'confirmado') {
         prioritariosConfirmados.add(j);
       } else if (estado == 'baja') {
@@ -2149,8 +2869,8 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
     final List<Jugador> colaPendientes = [];
     final List<Jugador> colaBajas = [];
 
-    for (var j in colaEspera) {
-      String estado = _obtenerEstadoDeMapa(j.nombre, asistencia);
+    for (final j in colaEspera) {
+      final String estado = _obtenerEstadoDeMapa(j.nombre, asistencia);
       if (estado == 'confirmado') {
         colaConfirmados.add(j);
       } else if (estado == 'baja') {
@@ -2160,8 +2880,10 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
       }
     }
 
-    final List<Jugador> ascendidosDeCola = colaConfirmados.take(cuposLiberadosParaCola).toList();
-    final List<Jugador> enEsperaConfirmados = colaConfirmados.skip(cuposLiberadosParaCola).toList();
+    final List<Jugador> ascendidosDeCola =
+        colaConfirmados.take(cuposLiberadosParaCola).toList();
+    final List<Jugador> enEsperaConfirmados =
+        colaConfirmados.skip(cuposLiberadosParaCola).toList();
 
     final List<Jugador> titularesConfirmados = [
       ...prioritariosConfirmados,
@@ -2173,7 +2895,8 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
 
     final String miEstado = _obtenerEstadoDeMapa(widget.nombreJugador, asistencia);
     final int totalTitulares = titularesConfirmados.length;
-    final jugadorActualObj = Jugador(nombre: widget.nombreJugador, email: widget.emailJugador);
+    final jugadorActualObj =
+        Jugador(nombre: widget.nombreJugador, email: widget.emailJugador);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16.0),
@@ -2187,42 +2910,83 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  const Text(
+                    kNombreTorneo,
+                    style: TextStyle(
+                      color: Colors.lightBlueAccent,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                            color: Colors.lightBlueAccent.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(20)),
-                        child: Text(dia,
-                            style: const TextStyle(
-                                color: Colors.lightBlueAccent,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12)),
+                          color: Colors.lightBlueAccent.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          dia,
+                          style: const TextStyle(
+                            color: Colors.lightBlueAccent,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
                       ),
-                      Text('Fútbol ${(cupoMaximo / 2).round()}',
-                          style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                      Text(
+                        'Fútbol ${(cupoMaximo / 2).round()}',
+                        style: const TextStyle(color: Colors.grey, fontSize: 13),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 12),
-                  Text(hora, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                  Text(
+                    hora,
+                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                  ),
                   const SizedBox(height: 6),
                   Row(
                     children: [
                       const Icon(Icons.location_on_outlined, size: 16, color: Colors.grey),
                       const SizedBox(width: 4),
                       Expanded(
-                          child: Text(lugar,
-                              style: const TextStyle(color: Colors.grey),
-                              overflow: TextOverflow.ellipsis)),
+                        child: InkWell(
+                          onTap: () async {
+                            if (mapsUrl.isEmpty) return;
+                            final uri = Uri.tryParse(mapsUrl);
+                            if (uri == null) return;
+                            if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('No se pudo abrir Google Maps.'),
+                                    backgroundColor: Colors.orange,
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                          child: Text(
+                            lugar,
+                            style: const TextStyle(color: Colors.grey),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                   const Divider(height: 24),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Cupos confirmados asegurados:', style: TextStyle(fontSize: 13)),
+                      const Text(
+                        'Cupos confirmados asegurados:',
+                        style: TextStyle(fontSize: 13),
+                      ),
                       Text(
                         '$totalTitulares / $cupoMaximo',
                         style: TextStyle(
@@ -2239,9 +3003,11 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                   LinearProgressIndicator(
                     value: (totalTitulares / cupoMaximo).clamp(0.0, 1.0),
                     backgroundColor: Colors.white10,
-                    valueColor: AlwaysStoppedAnimation<Color>(totalTitulares >= cupoMaximo
-                        ? Colors.lightBlueAccent
-                        : Colors.orangeAccent),
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      totalTitulares >= cupoMaximo
+                          ? Colors.lightBlueAccent
+                          : Colors.orangeAccent,
+                    ),
                     borderRadius: BorderRadius.circular(10),
                     minHeight: 6,
                   ),
@@ -2249,7 +3015,10 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                     const SizedBox(height: 8),
                     Text(
                       'Hay ${prioritariosPendientes.length} titular(es) con cupo reservado que todavía no respondieron.',
-                      style: const TextStyle(fontSize: 11, color: Colors.amberAccent),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Colors.amberAccent,
+                      ),
                     ),
                   ],
                 ],
@@ -2265,8 +3034,10 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('¿Jugás esta semana?',
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                  const Text(
+                    '¿Jugás esta semana?',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                  ),
                   const SizedBox(height: 10),
                   Row(
                     children: [
@@ -2274,8 +3045,9 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                         child: FilledButton.icon(
                           onPressed: () => _cambiarEstadoJugador(jugadorActualObj, 'confirmado'),
                           style: FilledButton.styleFrom(
-                            backgroundColor:
-                                miEstado == 'confirmado' ? const Color(0xFF1B5E20) : Colors.grey.shade800,
+                            backgroundColor: miEstado == 'confirmado'
+                                ? const Color(0xFF1B5E20)
+                                : Colors.grey.shade800,
                             foregroundColor: Colors.white,
                           ),
                           icon: const Icon(Icons.check, size: 18),
@@ -2287,13 +3059,21 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                         child: OutlinedButton.icon(
                           onPressed: () => _cambiarEstadoJugador(jugadorActualObj, 'baja'),
                           style: OutlinedButton.styleFrom(
-                              side: BorderSide(
-                                  color: miEstado == 'baja' ? Colors.redAccent : Colors.grey.shade700)),
-                          icon: Icon(Icons.close,
-                              size: 18, color: miEstado == 'baja' ? Colors.redAccent : Colors.grey),
-                          label: Text('Me bajo',
-                              style: TextStyle(
-                                  color: miEstado == 'baja' ? Colors.redAccent : Colors.grey)),
+                            side: BorderSide(
+                              color: miEstado == 'baja' ? Colors.redAccent : Colors.grey.shade700,
+                            ),
+                          ),
+                          icon: Icon(
+                            Icons.close,
+                            size: 18,
+                            color: miEstado == 'baja' ? Colors.redAccent : Colors.grey,
+                          ),
+                          label: Text(
+                            'Me bajo',
+                            style: TextStyle(
+                              color: miEstado == 'baja' ? Colors.redAccent : Colors.grey,
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -2309,7 +3089,10 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                 child: Text(
                   'Titulares Confirmados ($totalTitulares / $cupoMaximo)',
                   style: const TextStyle(
-                      fontSize: 14, fontWeight: FontWeight.bold, color: Colors.greenAccent),
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.greenAccent,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -2321,7 +3104,10 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
           if (titularesConfirmados.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 8.0),
-              child: Text('Aún no hay jugadores asegurados.', style: TextStyle(color: Colors.grey)),
+              child: Text(
+                'Aún no hay jugadores asegurados.',
+                style: TextStyle(color: Colors.grey),
+              ),
             )
           else
             ListView.builder(
@@ -2348,26 +3134,43 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                     leading: CircleAvatar(
                       radius: 14,
                       backgroundColor: Colors.green.shade800,
-                      child: Text('${index + 1}',
-                          style: const TextStyle(
-                              fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+                      child: Text(
+                        '${index + 1}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
                     ),
                     title: Row(
                       children: [
                         Expanded(
-                            child: Text(j.nombre,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontWeight: esYo ? FontWeight.bold : FontWeight.normal))),
+                          child: Text(
+                            j.nombre,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontWeight: esYo ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                        ),
                         if (esYo) ...[
                           const SizedBox(width: 6),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                                color: Colors.blueAccent, borderRadius: BorderRadius.circular(4)),
-                            child: const Text('Tú',
-                                style: TextStyle(
-                                    fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
+                              color: Colors.blueAccent,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text(
+                              'Tú',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                           ),
                         ],
                       ],
@@ -2380,11 +3183,14 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                           children: [
                             Icon(Icons.check_circle_outline, color: Colors.greenAccent, size: 16),
                             SizedBox(width: 4),
-                            Text('Juega',
-                                style: TextStyle(
-                                    color: Colors.greenAccent,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold)),
+                            Text(
+                              'Juega',
+                              style: TextStyle(
+                                color: Colors.greenAccent,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                           ],
                         ),
                         _buildBotonAdmin(j, 'confirmado'),
@@ -2399,11 +3205,18 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('En Espera (Confirmaron)',
-                    style: TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.bold, color: Colors.orangeAccent)),
-                Text('${enEsperaConfirmados.length}',
-                    style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                const Text(
+                  'En Espera (Confirmaron)',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.orangeAccent,
+                  ),
+                ),
+                Text(
+                  '${enEsperaConfirmados.length}',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
               ],
             ),
             const SizedBox(height: 8),
@@ -2427,23 +3240,40 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                     leading: CircleAvatar(
                       radius: 14,
                       backgroundColor: Colors.orange.shade900,
-                      child: Text('${index + 1}',
-                          style: const TextStyle(
-                              fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
+                      child: Text(
+                        '${index + 1}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
                     ),
                     title: Row(
                       children: [
                         Expanded(
-                            child: Text(j.nombre, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                          child: Text(
+                            j.nombre,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
                         if (esYo) ...[
                           const SizedBox(width: 6),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                                color: Colors.blueAccent, borderRadius: BorderRadius.circular(4)),
-                            child: const Text('Tú',
-                                style: TextStyle(
-                                    fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
+                              color: Colors.blueAccent,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text(
+                              'Tú',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                           ),
                         ],
                       ],
@@ -2460,7 +3290,10 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                         Text(
                           '${index + 1}° en cola',
                           style: const TextStyle(
-                              fontSize: 11, color: Colors.orangeAccent, fontWeight: FontWeight.bold),
+                            fontSize: 11,
+                            color: Colors.orangeAccent,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                         _buildBotonAdmin(j, 'confirmado'),
                       ],
@@ -2475,9 +3308,18 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Sin Responder / Pendientes',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)),
-                Text('${pendientes.length}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                const Text(
+                  'Sin Responder / Pendientes',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey,
+                  ),
+                ),
+                Text(
+                  '${pendientes.length}',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
               ],
             ),
             const SizedBox(height: 8),
@@ -2490,7 +3332,9 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                 final bool esTitularPrioritario =
                     prioritarios.any((p) => sonElMismoJugador(p.nombre, j.nombre));
                 final bool esTitularEnRiesgo = !esTitularPrioritario &&
-                    widget.titulares.skip(cupoMaximo).any((t) => sonElMismoJugador(t.nombre, j.nombre));
+                    widget.titulares.skip(cupoMaximo).any(
+                          (t) => sonElMismoJugador(t.nombre, j.nombre),
+                        );
 
                 String subtitulo;
                 Color colorSubtitulo;
@@ -2520,7 +3364,10 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                       size: 18,
                       color: colorSubtitulo,
                     ),
-                    title: Text(j.nombre, style: const TextStyle(color: Colors.white70)),
+                    title: Text(
+                      j.nombre,
+                      style: const TextStyle(color: Colors.white70),
+                    ),
                     subtitle: Text(
                       subtitulo,
                       style: TextStyle(fontSize: 10, color: colorSubtitulo),
@@ -2528,7 +3375,10 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Text('Sin responder', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                        const Text(
+                          'Sin responder',
+                          style: TextStyle(fontSize: 11, color: Colors.grey),
+                        ),
                         _buildBotonAdmin(j, 'pendiente'),
                       ],
                     ),
@@ -2539,9 +3389,14 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
           ],
           if (bajas.isNotEmpty) ...[
             const SizedBox(height: 16),
-            Text('No juegan (${bajas.length})',
-                style:
-                    const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.grey)),
+            Text(
+              'No juegan (${bajas.length})',
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey,
+              ),
+            ),
             const SizedBox(height: 8),
             ListView.builder(
               shrinkWrap: true,
@@ -2552,17 +3407,27 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                 return Card(
                   color: Colors.white.withValues(alpha: 0.03),
                   margin: const EdgeInsets.symmetric(vertical: 2),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                   child: ListTile(
                     dense: true,
                     leading: const Icon(Icons.person_off_outlined, color: Colors.grey, size: 18),
-                    title: Text(j.nombre, style: const TextStyle(color: Colors.grey)),
+                    title: Text(
+                      j.nombre,
+                      style: const TextStyle(color: Colors.grey),
+                    ),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Text('Baja',
-                            style: TextStyle(
-                                color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.w600)),
+                        const Text(
+                          'Baja',
+                          style: TextStyle(
+                            color: Colors.redAccent,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                         _buildBotonAdmin(j, 'baja'),
                       ],
                     ),
@@ -2581,6 +3446,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
 // ============================================================================
 // TABLA SCREEN (POSICIONES, PARTIDOS Y ESTADÍSTICAS)
 // ============================================================================
+
 class TablaScreen extends StatefulWidget {
   final bool esAdmin;
   final bool puedeCargarResultado;
@@ -2603,7 +3469,8 @@ class _TablaScreenState extends State<TablaScreen> {
   int _vistaSeleccionada = 0;
 
   void _mostrarDialogoCargarResultado(BuildContext context) async {
-    final snapshotPartido = await FirebaseFirestore.instance.collection('partidos').doc('actual').get();
+    final snapshotPartido =
+        await FirebaseFirestore.instance.collection('partidos').doc('actual').get();
     final Map<String, dynamic> asistencia =
         (snapshotPartido.data()?['asistencia'] as Map<String, dynamic>?) ?? {};
 
@@ -2625,22 +3492,30 @@ class _TablaScreenState extends State<TablaScreen> {
     final nombreEquipoBCtrl = TextEditingController(text: 'Equipo Amarillo');
 
     final Map<String, int> asignaciones = {
-      for (var j in jugadoresDisponibles) j: 0,
+      for (final j in jugadoresDisponibles) j: 0,
     };
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: const Color(0xFF142030),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (ctx) => StatefulBuilder(
         builder: (context, setModalState) {
-          final equipoA = asignaciones.entries.where((e) => e.value == 1).map((e) => e.key).toList();
-          final equipoB = asignaciones.entries.where((e) => e.value == 2).map((e) => e.key).toList();
+          final equipoA =
+              asignaciones.entries.where((e) => e.value == 1).map((e) => e.key).toList();
+          final equipoB =
+              asignaciones.entries.where((e) => e.value == 2).map((e) => e.key).toList();
 
           return Padding(
             padding: EdgeInsets.only(
-                top: 20, left: 20, right: 20, bottom: MediaQuery.of(context).viewInsets.bottom + 20),
+              top: 20,
+              left: 20,
+              right: 20,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+            ),
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -2653,10 +3528,16 @@ class _TablaScreenState extends State<TablaScreen> {
                         children: [
                           Icon(Icons.sports_score, color: Colors.lightBlueAccent),
                           SizedBox(width: 8),
-                          Text('Cargar Resultado', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          Text(
+                            'Cargar Resultado',
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                          ),
                         ],
                       ),
-                      IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                      IconButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        icon: const Icon(Icons.close),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -2665,17 +3546,21 @@ class _TablaScreenState extends State<TablaScreen> {
                     readOnly: true,
                     onTap: () async {
                       final picked = await showDatePicker(
-                          context: context,
-                          initialDate: DateTime.now(),
-                          firstDate: DateTime(2024),
-                          lastDate: DateTime(2035));
-                      if (picked != null) setModalState(() => fechaCtrl.text = formatearFechaEspanol(picked));
+                        context: context,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime(2024),
+                        lastDate: DateTime(2035),
+                      );
+                      if (picked != null) {
+                        setModalState(() => fechaCtrl.text = formatearFechaEspanol(picked));
+                      }
                     },
                     decoration: const InputDecoration(
-                        labelText: 'Fecha del Partido',
-                        prefixIcon: Icon(Icons.calendar_month, color: Colors.lightBlueAccent, size: 20),
-                        suffixIcon: Icon(Icons.arrow_drop_down),
-                        isDense: true),
+                      labelText: 'Fecha del Partido',
+                      prefixIcon: Icon(Icons.calendar_month, color: Colors.lightBlueAccent, size: 20),
+                      suffixIcon: Icon(Icons.arrow_drop_down),
+                      isDense: true,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   Row(
@@ -2684,55 +3569,90 @@ class _TablaScreenState extends State<TablaScreen> {
                         child: Column(
                           children: [
                             TextField(
-                                controller: nombreEquipoACtrl,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                                decoration: const InputDecoration(isDense: true, border: InputBorder.none)),
+                              controller: nombreEquipoACtrl,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                              decoration: const InputDecoration(
+                                isDense: true,
+                                border: InputBorder.none,
+                              ),
+                            ),
                             TextField(
-                                controller: golesACtrl,
-                                textAlign: TextAlign.center,
-                                keyboardType: TextInputType.number,
-                                style: const TextStyle(
-                                    fontSize: 28, fontWeight: FontWeight.bold, color: Colors.lightBlueAccent),
-                                decoration: const InputDecoration(
-                                    hintText: '0', border: OutlineInputBorder(), isDense: true)),
+                              controller: golesACtrl,
+                              textAlign: TextAlign.center,
+                              keyboardType: TextInputType.number,
+                              style: const TextStyle(
+                                fontSize: 28,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.lightBlueAccent,
+                              ),
+                              decoration: const InputDecoration(
+                                hintText: '0',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                            ),
                             const SizedBox(height: 4),
-                            Text('${equipoA.length} jugadores',
-                                style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                            Text(
+                              '${equipoA.length} jugadores',
+                              style: const TextStyle(fontSize: 11, color: Colors.grey),
+                            ),
                           ],
                         ),
                       ),
                       const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 12.0),
-                          child: Text('VS',
-                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.grey))),
+                        padding: EdgeInsets.symmetric(horizontal: 12.0),
+                        child: Text(
+                          'VS',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ),
                       Expanded(
                         child: Column(
                           children: [
                             TextField(
-                                controller: nombreEquipoBCtrl,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                                decoration: const InputDecoration(isDense: true, border: InputBorder.none)),
+                              controller: nombreEquipoBCtrl,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                              decoration: const InputDecoration(
+                                isDense: true,
+                                border: InputBorder.none,
+                              ),
+                            ),
                             TextField(
-                                controller: golesBCtrl,
-                                textAlign: TextAlign.center,
-                                keyboardType: TextInputType.number,
-                                style: const TextStyle(
-                                    fontSize: 28, fontWeight: FontWeight.bold, color: Colors.orangeAccent),
-                                decoration: const InputDecoration(
-                                    hintText: '0', border: OutlineInputBorder(), isDense: true)),
+                              controller: golesBCtrl,
+                              textAlign: TextAlign.center,
+                              keyboardType: TextInputType.number,
+                              style: const TextStyle(
+                                fontSize: 28,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.orangeAccent,
+                              ),
+                              decoration: const InputDecoration(
+                                hintText: '0',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                            ),
                             const SizedBox(height: 4),
-                            Text('${equipoB.length} jugadores',
-                                style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                            Text(
+                              '${equipoB.length} jugadores',
+                              style: const TextStyle(fontSize: 11, color: Colors.grey),
+                            ),
                           ],
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 20),
-                  const Text('Asignar Equipos (Blanco ➔ Negro ➔ Quitar)',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+                  const Text(
+                    'Asignar Equipos (Blanco ➔ Negro ➔ Quitar)',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
+                  ),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 6,
@@ -2774,7 +3694,10 @@ class _TablaScreenState extends State<TablaScreen> {
 
                       if (equipoA.isEmpty || equipoB.isEmpty) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Debes asignar jugadores a ambos equipos.')));
+                          const SnackBar(
+                            content: Text('Debes asignar jugadores a ambos equipos.'),
+                          ),
+                        );
                         return;
                       }
 
@@ -2814,7 +3737,7 @@ class _TablaScreenState extends State<TablaScreen> {
     );
   }
 
-  Widget _buildVistaEstadisticas(List<QueryDocumentSnapshot> docs) {
+  Widget _buildVistaEstadisticas(List<QueryDocumentSnapshot<Object?>> docs) {
     if (docs.isEmpty) {
       return Card(
         color: Colors.white.withValues(alpha: 0.03),
@@ -2842,7 +3765,6 @@ class _TablaScreenState extends State<TablaScreen> {
       return base;
     }
 
-    // Orden cronológico (del más viejo al más nuevo) para evaluar rachas consecutivas
     final cronologicos = docs.reversed.toList();
 
     final Map<String, int> victoriasJuntos = {};
@@ -2856,7 +3778,7 @@ class _TablaScreenState extends State<TablaScreen> {
     final Map<String, int> rachaActual = {};
     final Map<String, int> rachaHistorica = {};
 
-    for (var doc in cronologicos) {
+    for (final doc in cronologicos) {
       final data = doc.data() as Map<String, dynamic>;
       final int golesA = data['equipoA_goles'] ?? 0;
       final int golesB = data['equipoB_goles'] ?? 0;
@@ -2895,7 +3817,6 @@ class _TablaScreenState extends State<TablaScreen> {
       procesarDuplas(teamA, ganaA, ganaB);
       procesarDuplas(teamB, ganaB, ganaA);
 
-      // Rivales clásicos (jugaron en equipos opuestos)
       for (final pA in teamA) {
         for (final pB in teamB) {
           if (pA == pB) continue;
@@ -2905,16 +3826,17 @@ class _TablaScreenState extends State<TablaScreen> {
           victoriasEnfrentados.putIfAbsent(key, () => {par[0]: 0, par[1]: 0});
 
           if (ganaA) {
-            victoriasEnfrentados[key]![pA] = (victoriasEnfrentados[key]![pA] ?? 0) + 1;
+            victoriasEnfrentados[key]![pA] =
+                (victoriasEnfrentados[key]![pA] ?? 0) + 1;
           } else if (ganaB) {
-            victoriasEnfrentados[key]![pB] = (victoriasEnfrentados[key]![pB] ?? 0) + 1;
+            victoriasEnfrentados[key]![pB] =
+                (victoriasEnfrentados[key]![pB] ?? 0) + 1;
           } else {
             empatesEnfrentados[key] = (empatesEnfrentados[key] ?? 0) + 1;
           }
         }
       }
 
-      // Racha histórica de victorias consecutivas
       final participantes = {...teamA, ...teamB};
       for (final p in participantes) {
         final enA = teamA.contains(p);
@@ -2922,8 +3844,8 @@ class _TablaScreenState extends State<TablaScreen> {
 
         if (gano) {
           rachaActual[p] = (rachaActual[p] ?? 0) + 1;
-          if (rachaActual[p]! > (rachaHistorica[p] ?? 0)) {
-            rachaHistorica[p] = rachaActual[p]!;
+          if ((rachaActual[p] ?? 0) > (rachaHistorica[p] ?? 0)) {
+            rachaHistorica[p] = rachaActual[p] ?? 0;
           }
         } else {
           rachaActual[p] = 0;
@@ -2931,7 +3853,6 @@ class _TablaScreenState extends State<TablaScreen> {
       }
     }
 
-    // 1. La mejor dupla
     String? mejorDuplaP1, mejorDuplaP2;
     int mejorDuplaVictorias = 0;
     int mejorDuplaTotal = 0;
@@ -2945,7 +3866,6 @@ class _TablaScreenState extends State<TablaScreen> {
       }
     }
 
-    // 2. La peor dupla
     String? peorDuplaP1, peorDuplaP2;
     int peorDuplaDerrotas = 0;
     int peorDuplaTotal = 0;
@@ -2959,7 +3879,6 @@ class _TablaScreenState extends State<TablaScreen> {
       }
     }
 
-    // 3. Rivales clásicos
     String? rivalP1, rivalP2;
     int maxEnfrentamientos = 0;
     int rivalWins1 = 0;
@@ -2978,7 +3897,6 @@ class _TablaScreenState extends State<TablaScreen> {
       }
     }
 
-    // 4. Racha histórica
     String? rachaJugador;
     int maxRacha = 0;
     for (final entry in rachaHistorica.entries) {
@@ -3129,9 +4047,9 @@ class _TablaScreenState extends State<TablaScreen> {
         }
 
         final docs = snapshot.data?.docs ?? [];
-        final Map<String, Map<String, int>> stats = {};
+        final Map<String, Map<String, dynamic>> stats = {};
 
-        for (var doc in docs) {
+        for (final doc in docs) {
           final data = doc.data() as Map<String, dynamic>;
           final int golesA = data['equipoA_goles'] ?? 0;
           final int golesB = data['equipoB_goles'] ?? 0;
@@ -3142,41 +4060,63 @@ class _TablaScreenState extends State<TablaScreen> {
           final bool ganaB = golesB > golesA;
           final bool empate = golesA == golesB;
 
-          void registrar(String jugadorRaw, bool gano, bool empato, bool perdio, int gf, int gc) {
+          void registrar(
+            String jugadorRaw,
+            bool gano,
+            bool empato,
+            bool perdio,
+            int gf,
+            int gc,
+          ) {
             final l = limpiarNombre(jugadorRaw);
             final jugador = l.isNotEmpty ? l : jugadorRaw.trim();
             if (jugador.isEmpty) return;
 
-            stats.putIfAbsent(jugador, () => {'pj': 0, 'pg': 0, 'pe': 0, 'pp': 0, 'pts': 0, 'gf': 0, 'gc': 0});
-            stats[jugador]!['pj'] = stats[jugador]!['pj']! + 1;
-            stats[jugador]!['gf'] = stats[jugador]!['gf']! + gf;
-            stats[jugador]!['gc'] = stats[jugador]!['gc']! + gc;
+            stats.putIfAbsent(
+              jugador,
+              () => {'pj': 0, 'pg': 0, 'pe': 0, 'pp': 0, 'pts': 0, 'gf': 0, 'gc': 0},
+            );
+            stats[jugador]!['pj'] = (stats[jugador]!['pj'] as int) + 1;
+            stats[jugador]!['gf'] = (stats[jugador]!['gf'] as int) + gf;
+            stats[jugador]!['gc'] = (stats[jugador]!['gc'] as int) + gc;
             if (gano) {
-              stats[jugador]!['pg'] = stats[jugador]!['pg']! + 1;
-              stats[jugador]!['pts'] = stats[jugador]!['pts']! + 3;
+              stats[jugador]!['pg'] = (stats[jugador]!['pg'] as int) + 1;
+              stats[jugador]!['pts'] = (stats[jugador]!['pts'] as int) + 3;
             } else if (empato) {
-              stats[jugador]!['pe'] = stats[jugador]!['pe']! + 1;
-              stats[jugador]!['pts'] = stats[jugador]!['pts']! + 1;
+              stats[jugador]!['pe'] = (stats[jugador]!['pe'] as int) + 1;
+              stats[jugador]!['pts'] = (stats[jugador]!['pts'] as int) + 1;
             } else if (perdio) {
-              stats[jugador]!['pp'] = stats[jugador]!['pp']! + 1;
+              stats[jugador]!['pp'] = (stats[jugador]!['pp'] as int) + 1;
             }
           }
 
-          for (var j in eqA) {
+          for (final j in eqA) {
             registrar(j.toString(), ganaA, empate, ganaB, golesA, golesB);
           }
-          for (var j in eqB) {
+          for (final j in eqB) {
             registrar(j.toString(), ganaB, empate, ganaA, golesB, golesA);
           }
         }
 
-        final listaRanking = stats.entries.toList()
+        final listaRanking = stats.entries.map((entry) {
+          final data = Map<String, dynamic>.from(entry.value);
+          final int pj = data['pj'] as int;
+          final int puntos = data['pts'] as int;
+          final double promedio = pj > 0 ? (puntos / pj).toDouble() : 0.0;
+          data['promedio'] = promedio;
+          return MapEntry(entry.key, data);
+        }).toList()
           ..sort((a, b) {
-            final int cmpPts = b.value['pts']!.compareTo(a.value['pts']!);
+            final int cmpPts = (b.value['pts'] as int).compareTo(a.value['pts'] as int);
             if (cmpPts != 0) return cmpPts;
-            final int difA = a.value['gf']! - a.value['gc']!;
-            final int difB = b.value['gf']! - b.value['gc']!;
-            return difB.compareTo(difA);
+
+            final double promedioA = (a.value['promedio'] as double?) ?? 0.0;
+            final double promedioB = (b.value['promedio'] as double?) ?? 0.0;
+            final int cmpProm = promedioB.compareTo(promedioA);
+            if (cmpProm != 0) return cmpProm;
+
+            final int cmpPJ = (a.value['pj'] as int).compareTo(b.value['pj'] as int);
+            return cmpPJ;
           });
 
         return Scaffold(
@@ -3242,6 +4182,7 @@ class _TablaScreenState extends State<TablaScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
+
                 if (_vistaSeleccionada == 0) ...[
                   if (listaRanking.isEmpty)
                     Card(
@@ -3249,54 +4190,100 @@ class _TablaScreenState extends State<TablaScreen> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                       child: const Padding(
                         padding: EdgeInsets.all(24.0),
-                        child:
-                            Center(child: Text('Aún no hay partidos cargados.', style: TextStyle(color: Colors.grey))),
+                        child: Center(
+                          child: Text(
+                            'Aún no hay partidos cargados.',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        ),
                       ),
                     )
                   else ...[
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(8)),
+                        color: Colors.white.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                       child: const Row(
                         children: [
                           SizedBox(
-                              width: 24,
-                              child: Text('#',
-                                  style: TextStyle(
-                                      fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey))),
+                            width: 24,
+                            child: Text(
+                              '#',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ),
                           Expanded(
-                              child: Text('Jugador',
-                                  style: TextStyle(
-                                      fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey))),
+                            child: Text(
+                              'Jugador',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ),
                           SizedBox(
-                              width: 28,
-                              child: Text('PJ',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(fontSize: 12, color: Colors.grey))),
+                            width: 28,
+                            child: Text(
+                              'PJ',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(fontSize: 12, color: Colors.grey),
+                            ),
+                          ),
                           SizedBox(
-                              width: 28,
-                              child: Text('PG',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(fontSize: 12, color: Colors.grey))),
+                            width: 28,
+                            child: Text(
+                              'PG',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(fontSize: 12, color: Colors.grey),
+                            ),
+                          ),
                           SizedBox(
-                              width: 28,
-                              child: Text('PE',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(fontSize: 12, color: Colors.grey))),
+                            width: 28,
+                            child: Text(
+                              'PE',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(fontSize: 12, color: Colors.grey),
+                            ),
+                          ),
                           SizedBox(
-                              width: 28,
-                              child: Text('PP',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(fontSize: 12, color: Colors.grey))),
+                            width: 28,
+                            child: Text(
+                              'PP',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(fontSize: 12, color: Colors.grey),
+                            ),
+                          ),
                           SizedBox(
-                              width: 36,
-                              child: Text('PTS',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.lightBlueAccent))),
+                            width: 36,
+                            child: Text(
+                              'PTS',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.lightBlueAccent,
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 40,
+                            child: Text(
+                              'PROM',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.tealAccent,
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -3313,6 +4300,10 @@ class _TablaScreenState extends State<TablaScreen> {
 
                         final bool esPodio = index == 0 || index == 1 || index == 2;
                         final Color colorNumero = esPodio ? Colors.orangeAccent : Colors.grey;
+
+                        final int pj = data['pj'] as int;
+                        final double promedio = (data['promedio'] as double?) ?? 0.0;
+                        final String promedioTexto = promedio.toStringAsFixed(2);
 
                         return Card(
                           margin: const EdgeInsets.symmetric(vertical: 3),
@@ -3340,38 +4331,70 @@ class _TablaScreenState extends State<TablaScreen> {
                                   ),
                                 ),
                                 Expanded(
-                                    child: Text(nombre,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(
-                                            fontWeight: esYo ? FontWeight.bold : FontWeight.normal))),
+                                  child: Text(
+                                    nombre,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontWeight: esYo ? FontWeight.bold : FontWeight.normal,
+                                    ),
+                                  ),
+                                ),
                                 SizedBox(
-                                    width: 28,
-                                    child: Text('${data['pj']}',
-                                        textAlign: TextAlign.center, style: const TextStyle(fontSize: 13))),
+                                  width: 28,
+                                  child: Text(
+                                    '$pj',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                ),
                                 SizedBox(
-                                    width: 28,
-                                    child: Text('${data['pg']}',
-                                        textAlign: TextAlign.center,
-                                        style: const TextStyle(fontSize: 13, color: Colors.tealAccent))),
+                                  width: 28,
+                                  child: Text(
+                                    '${data['pg']}',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(fontSize: 13, color: Colors.tealAccent),
+                                  ),
+                                ),
                                 SizedBox(
-                                    width: 28,
-                                    child: Text('${data['pe']}',
-                                        textAlign: TextAlign.center,
-                                        style: const TextStyle(fontSize: 13, color: Colors.grey))),
+                                  width: 28,
+                                  child: Text(
+                                    '${data['pe']}',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(fontSize: 13, color: Colors.grey),
+                                  ),
+                                ),
                                 SizedBox(
-                                    width: 28,
-                                    child: Text('${data['pp']}',
-                                        textAlign: TextAlign.center,
-                                        style: const TextStyle(fontSize: 13, color: Colors.redAccent))),
+                                  width: 28,
+                                  child: Text(
+                                    '${data['pp']}',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(fontSize: 13, color: Colors.redAccent),
+                                  ),
+                                ),
                                 SizedBox(
-                                    width: 36,
-                                    child: Text('${data['pts']}',
-                                        textAlign: TextAlign.center,
-                                        style: const TextStyle(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.lightBlueAccent))),
+                                  width: 36,
+                                  child: Text(
+                                    '${data['pts']}',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.lightBlueAccent,
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(
+                                  width: 40,
+                                  child: Text(
+                                    promedioTexto,
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.tealAccent,
+                                    ),
+                                  ),
+                                ),
                               ],
                             ),
                           ),
@@ -3380,13 +4403,18 @@ class _TablaScreenState extends State<TablaScreen> {
                     ),
                   ],
                 ],
+
                 if (_vistaSeleccionada == 1) ...[
                   if (docs.isEmpty)
                     const Padding(
-                        padding: EdgeInsets.all(24.0),
-                        child: Center(
-                            child: Text('No hay partidos en el historial.',
-                                style: TextStyle(color: Colors.grey))))
+                      padding: EdgeInsets.all(24.0),
+                      child: Center(
+                        child: Text(
+                          'No hay partidos en el historial.',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ),
+                    )
                   else
                     ListView.builder(
                       shrinkWrap: true,
@@ -3414,20 +4442,24 @@ class _TablaScreenState extends State<TablaScreen> {
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Text(fecha,
-                                        style: const TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.lightBlueAccent)),
+                                    Text(
+                                      fecha,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.lightBlueAccent,
+                                      ),
+                                    ),
                                     if (widget.esAdmin)
                                       IconButton(
                                         icon: const Icon(Icons.delete_outline,
                                             size: 18, color: Colors.redAccent),
                                         tooltip: 'Borrar partido',
-                                        onPressed: () async => await FirebaseFirestore.instance
-                                            .collection('historial_partidos')
-                                            .doc(docId)
-                                            .delete(),
+                                        onPressed: () async =>
+                                            await FirebaseFirestore.instance
+                                                .collection('historial_partidos')
+                                                .doc(docId)
+                                                .delete(),
                                       ),
                                   ],
                                 ),
@@ -3436,32 +4468,55 @@ class _TablaScreenState extends State<TablaScreen> {
                                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                                   children: [
                                     Expanded(
-                                        child: Column(children: [
-                                      Text(eqA,
-                                          textAlign: TextAlign.center,
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.bold, fontSize: 13)),
-                                      const SizedBox(height: 4),
-                                      Text('$golesA',
-                                          style: const TextStyle(
+                                      child: Column(
+                                        children: [
+                                          Text(
+                                            eqA,
+                                            textAlign: TextAlign.center,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            '$golesA',
+                                            style: const TextStyle(
                                               fontSize: 26,
                                               fontWeight: FontWeight.bold,
-                                              color: Colors.lightBlueAccent))
-                                    ])),
-                                    const Text('vs', style: TextStyle(fontSize: 16, color: Colors.grey)),
+                                              color: Colors.lightBlueAccent,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const Text(
+                                      'vs',
+                                      style: TextStyle(fontSize: 16, color: Colors.grey),
+                                    ),
                                     Expanded(
-                                        child: Column(children: [
-                                      Text(eqB,
-                                          textAlign: TextAlign.center,
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.bold, fontSize: 13)),
-                                      const SizedBox(height: 4),
-                                      Text('$golesB',
-                                          style: const TextStyle(
+                                      child: Column(
+                                        children: [
+                                          Text(
+                                            eqB,
+                                            textAlign: TextAlign.center,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            '$golesB',
+                                            style: const TextStyle(
                                               fontSize: 26,
                                               fontWeight: FontWeight.bold,
-                                              color: Colors.orangeAccent))
-                                    ])),
+                                              color: Colors.orangeAccent,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                                   ],
                                 ),
                                 const SizedBox(height: 10),
@@ -3469,18 +4524,26 @@ class _TablaScreenState extends State<TablaScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Expanded(
-                                        child: Text(
-                                            jugsA.map((j) => limpiarNombre(j.toString())).join(', '),
-                                            style:
-                                                const TextStyle(fontSize: 11, color: Colors.white60),
-                                            textAlign: TextAlign.center)),
+                                      child: Text(
+                                        jugsA.map((j) => limpiarNombre(j.toString())).join(', '),
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.white60,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
                                     const SizedBox(width: 8),
                                     Expanded(
-                                        child: Text(
-                                            jugsB.map((j) => limpiarNombre(j.toString())).join(', '),
-                                            style:
-                                                const TextStyle(fontSize: 11, color: Colors.white60),
-                                            textAlign: TextAlign.center)),
+                                      child: Text(
+                                        jugsB.map((j) => limpiarNombre(j.toString())).join(', '),
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.white60,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
                                   ],
                                 ),
                               ],
@@ -3490,9 +4553,11 @@ class _TablaScreenState extends State<TablaScreen> {
                       },
                     ),
                 ],
+
                 if (_vistaSeleccionada == 2) ...[
                   _buildVistaEstadisticas(docs),
                 ],
+
                 const SizedBox(height: 80),
               ],
             ),
@@ -3503,7 +4568,10 @@ class _TablaScreenState extends State<TablaScreen> {
                   backgroundColor: Colors.lightBlueAccent,
                   foregroundColor: Colors.black,
                   icon: const Icon(Icons.add),
-                  label: const Text('Cargar Resultado', style: TextStyle(fontWeight: FontWeight.bold)),
+                  label: const Text(
+                    'Cargar Resultado',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
                 )
               : null,
         );
@@ -3515,6 +4583,7 @@ class _TablaScreenState extends State<TablaScreen> {
 // ============================================================================
 // ROTACIÓN SCREEN (LISTA DE ROTACIÓN Y CAMISETAS)
 // ============================================================================
+
 class RotacionScreen extends StatelessWidget {
   final bool esAdmin;
   final List<Jugador> titulares;
@@ -3529,7 +4598,11 @@ class RotacionScreen extends StatelessWidget {
     required this.onAbrirGestionPlantel,
   });
 
-  void _abrirSelectorCamisetas(BuildContext context, List<String> listaAlfabeticas, String actual) {
+  void _abrirSelectorCamisetas(
+    BuildContext context,
+    List<String> listaAlfabeticas,
+    String actual,
+  ) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -3543,10 +4616,13 @@ class RotacionScreen extends StatelessWidget {
               final nombre = listaAlfabeticas[index];
               final esEl = sonElMismoJugador(nombre, actual);
               return ListTile(
-                title: Text(nombre,
-                    style: TextStyle(
-                        fontWeight: esEl ? FontWeight.bold : FontWeight.normal,
-                        color: esEl ? Colors.lightBlueAccent : Colors.white)),
+                title: Text(
+                  nombre,
+                  style: TextStyle(
+                    fontWeight: esEl ? FontWeight.bold : FontWeight.normal,
+                    color: esEl ? Colors.lightBlueAccent : Colors.white,
+                  ),
+                ),
                 trailing: esEl ? const Icon(Icons.check, color: Colors.lightBlueAccent) : null,
                 onTap: () async {
                   await FirebaseFirestore.instance
@@ -3570,7 +4646,9 @@ class RotacionScreen extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       backgroundColor: const Color(0xFF142030),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (ctx) => StatefulBuilder(
         builder: (context, setModalState) {
           return Padding(
@@ -3579,11 +4657,15 @@ class RotacionScreen extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text('Reordenar Lista de Rotación',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const Text(
+                  'Reordenar Lista de Rotación',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
                 const SizedBox(height: 8),
-                const Text('Mantené presionado y arrastrá para cambiar el orden de prioridad.',
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
+                const Text(
+                  'Mantené presionado y arrastrá para cambiar el orden de prioridad.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
                 const SizedBox(height: 16),
                 SizedBox(
                   height: 380,
@@ -3602,12 +4684,21 @@ class RotacionScreen extends StatelessWidget {
                           leading: CircleAvatar(
                             radius: 12,
                             backgroundColor: i < 10 ? Colors.green.shade800 : Colors.red.shade900,
-                            child: Text('${i + 1}',
-                                style: const TextStyle(
-                                    fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
+                            child: Text(
+                              '${i + 1}',
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                           ),
-                          title: Text(tempOrden[i].nombre,
-                              style: TextStyle(color: i < 10 ? Colors.greenAccent : Colors.redAccent)),
+                          title: Text(
+                            tempOrden[i].nombre,
+                            style: TextStyle(
+                              color: i < 10 ? Colors.greenAccent : Colors.redAccent,
+                            ),
+                          ),
                           trailing: const Icon(Icons.drag_handle, color: Colors.grey),
                         ),
                     ],
@@ -3688,8 +4779,10 @@ class RotacionScreen extends StatelessWidget {
                             children: [
                               Icon(Icons.dry_cleaning, color: Colors.lightBlueAccent, size: 22),
                               SizedBox(width: 8),
-                              Text('Rotación de Camisetas',
-                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                              Text(
+                                'Rotación de Camisetas',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                              ),
                             ],
                           ),
                           if (esAdmin)
@@ -3697,7 +4790,10 @@ class RotacionScreen extends StatelessWidget {
                               tooltip: 'Seleccionar quién las tiene',
                               icon: const Icon(Icons.edit, size: 18, color: Colors.lightBlueAccent),
                               onPressed: () => _abrirSelectorCamisetas(
-                                  context, listaCamisetasAlfabeticas, nombreVisibleLasTiene),
+                                context,
+                                listaCamisetasAlfabeticas,
+                                nombreVisibleLasTiene,
+                              ),
                             ),
                         ],
                       ),
@@ -3705,24 +4801,33 @@ class RotacionScreen extends StatelessWidget {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.04),
-                            borderRadius: BorderRadius.circular(12)),
+                          color: Colors.white.withValues(alpha: 0.04),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                         child: Row(
                           children: [
                             const CircleAvatar(
-                                radius: 16,
-                                backgroundColor: Colors.white12,
-                                child: Icon(Icons.checkroom, color: Colors.white70, size: 18)),
+                              radius: 16,
+                              backgroundColor: Colors.white12,
+                              child: Icon(Icons.checkroom, color: Colors.white70, size: 18),
+                            ),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text('Las tiene:',
-                                      style: TextStyle(fontSize: 11, color: Colors.grey)),
-                                  Text(nombreVisibleLasTiene,
-                                      style: const TextStyle(
-                                          fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                                  const Text(
+                                    'Las tiene:',
+                                    style: TextStyle(fontSize: 11, color: Colors.grey),
+                                  ),
+                                  Text(
+                                    nombreVisibleLasTiene,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -3740,21 +4845,27 @@ class RotacionScreen extends StatelessWidget {
                         child: Row(
                           children: [
                             const CircleAvatar(
-                                radius: 16,
-                                backgroundColor: Colors.lightBlueAccent,
-                                child: Icon(Icons.arrow_forward, color: Colors.black, size: 18)),
+                              radius: 16,
+                              backgroundColor: Colors.lightBlueAccent,
+                              child: Icon(Icons.arrow_forward, color: Colors.black, size: 18),
+                            ),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text('Le toca llevarlas:',
-                                      style: TextStyle(fontSize: 11, color: Colors.lightBlueAccent)),
-                                  Text(leTocaLlevarlas,
-                                      style: const TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.lightBlueAccent)),
+                                  const Text(
+                                    'Le toca llevarlas:',
+                                    style: TextStyle(fontSize: 11, color: Colors.lightBlueAccent),
+                                  ),
+                                  Text(
+                                    leTocaLlevarlas,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.lightBlueAccent,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -3767,12 +4878,15 @@ class RotacionScreen extends StatelessWidget {
                           width: double.infinity,
                           child: OutlinedButton.icon(
                             style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.lightBlueAccent,
-                                side: const BorderSide(color: Colors.lightBlueAccent)),
+                              foregroundColor: Colors.lightBlueAccent,
+                              side: const BorderSide(color: Colors.lightBlueAccent),
+                            ),
                             icon: const Icon(Icons.done_all, size: 16),
                             label: Text('Confirmar entrega a $leTocaLlevarlas'),
-                            onPressed: () async => await docRefConfig
-                                .set({'lasTiene': leTocaLlevarlas}, SetOptions(merge: true)),
+                            onPressed: () async => await docRefConfig.set(
+                              {'lasTiene': leTocaLlevarlas},
+                              SetOptions(merge: true),
+                            ),
                           ),
                         ),
                       ],
@@ -3784,8 +4898,10 @@ class RotacionScreen extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Lista de Rotación',
-                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+                  const Text(
+                    'Lista de Rotación',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                  ),
                   if (esAdmin)
                     Row(
                       mainAxisSize: MainAxisSize.min,
@@ -3797,20 +4913,26 @@ class RotacionScreen extends StatelessWidget {
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                           ),
                           icon: const Icon(Icons.people_alt, size: 16),
-                          label: const Text('Plantel',
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          label: const Text(
+                            'Plantel',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
                           onPressed: onAbrirGestionPlantel,
                         ),
                         const SizedBox(width: 6),
                         TextButton.icon(
-                          style:
-                              TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 6)),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                          ),
                           icon: const Icon(Icons.swap_vert, size: 15, color: Colors.lightBlueAccent),
-                          label: const Text('Reordenar',
-                              style: TextStyle(
-                                  color: Colors.lightBlueAccent,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold)),
+                          label: const Text(
+                            'Reordenar',
+                            style: TextStyle(
+                              color: Colors.lightBlueAccent,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                           onPressed: () => _abrirEditorCola(context),
                         ),
                       ],
@@ -3821,14 +4943,21 @@ class RotacionScreen extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                    color: Colors.green.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(8)),
+                  color: Colors.green.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
                 child: const Row(
                   children: [
                     Icon(Icons.shield, color: Colors.greenAccent, size: 16),
                     SizedBox(width: 6),
-                    Text('LUGAR ASEGURADO / PRIORIDAD (1 - 10)',
-                        style: TextStyle(
-                            color: Colors.greenAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+                    Text(
+                      'LUGAR ASEGURADO / PRIORIDAD (1 - 10)',
+                      style: TextStyle(
+                        color: Colors.greenAccent,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -3839,8 +4968,11 @@ class RotacionScreen extends StatelessWidget {
                   child: const Padding(
                     padding: EdgeInsets.all(14.0),
                     child: Center(
-                        child: Text('No hay titulares en rotación. Andá a "Plantel" para cargarlos.',
-                            style: TextStyle(color: Colors.grey))),
+                      child: Text(
+                        'No hay titulares en rotación. Andá a "Plantel" para cargarlos.',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ),
                   ),
                 )
               else
@@ -3863,14 +4995,26 @@ class RotacionScreen extends StatelessWidget {
                           radius: 13,
                           backgroundColor: Colors.greenAccent,
                           foregroundColor: Colors.black,
-                          child: Text('${index + 1}',
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                          child: Text(
+                            '${index + 1}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ),
-                        title: Text(jugador,
-                            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-                        trailing: const Text('Titular asegurado',
-                            style: TextStyle(
-                                fontSize: 11, color: Colors.greenAccent, fontWeight: FontWeight.w600)),
+                        title: Text(
+                          jugador,
+                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                        trailing: const Text(
+                          'Titular asegurado',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.greenAccent,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
                     );
                   },
@@ -3879,14 +5023,21 @@ class RotacionScreen extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                    color: Colors.red.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(8)),
+                  color: Colors.red.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
                 child: const Row(
                   children: [
                     Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 16),
                     SizedBox(width: 6),
-                    Text('EN RIESGO / COLA DE ESPERA (11 - 15)',
-                        style: TextStyle(
-                            color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+                    Text(
+                      'EN RIESGO / COLA DE ESPERA (11 - 15)',
+                      style: TextStyle(
+                        color: Colors.redAccent,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -3894,8 +5045,10 @@ class RotacionScreen extends StatelessWidget {
               if (rojos.isEmpty)
                 const Padding(
                   padding: EdgeInsets.all(8.0),
-                  child: Text('No hay jugadores en riesgo de rotación.',
-                      style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  child: Text(
+                    'No hay jugadores en riesgo de rotación.',
+                    style: TextStyle(color: Colors.grey, fontSize: 12),
+                  ),
                 )
               else
                 ListView.builder(
@@ -3918,15 +5071,28 @@ class RotacionScreen extends StatelessWidget {
                           radius: 13,
                           backgroundColor: Colors.redAccent,
                           foregroundColor: Colors.white,
-                          child: Text('$pos',
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                          child: Text(
+                            '$pos',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ),
-                        title: Text(jugador,
-                            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white70)),
+                        title: Text(
+                          jugador,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white70,
+                          ),
+                        ),
                         trailing: Text(
                           '${index + 1}° en entrar si hay baja',
                           style: const TextStyle(
-                              fontSize: 11, color: Colors.redAccent, fontWeight: FontWeight.bold),
+                            fontSize: 11,
+                            color: Colors.redAccent,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                     );
@@ -3937,8 +5103,9 @@ class RotacionScreen extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                      color: Colors.orange.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(8)),
+                    color: Colors.orange.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -3946,15 +5113,20 @@ class RotacionScreen extends StatelessWidget {
                         children: [
                           Icon(Icons.swap_vert, color: Colors.orangeAccent, size: 16),
                           SizedBox(width: 6),
-                          Text('SUPLENTES / RESERVAS',
-                              style: TextStyle(
-                                  color: Colors.orangeAccent,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12)),
+                          Text(
+                            'SUPLENTES / RESERVAS',
+                            style: TextStyle(
+                              color: Colors.orangeAccent,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
                         ],
                       ),
-                      Text('${suplentes.length}',
-                          style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                      Text(
+                        '${suplentes.length}',
+                        style: const TextStyle(color: Colors.grey, fontSize: 12),
+                      ),
                     ],
                   ),
                 ),
@@ -3971,10 +5143,14 @@ class RotacionScreen extends StatelessWidget {
                       child: ListTile(
                         dense: true,
                         leading: const Icon(Icons.person_outline, size: 18, color: Colors.grey),
-                        title: Text(j.nombre,
-                            style: const TextStyle(color: Colors.grey, fontSize: 13)),
-                        trailing: const Text('Reserva',
-                            style: TextStyle(color: Colors.grey, fontSize: 11)),
+                        title: Text(
+                          j.nombre,
+                          style: const TextStyle(color: Colors.grey, fontSize: 13),
+                        ),
+                        trailing: const Text(
+                          'Reserva',
+                          style: TextStyle(color: Colors.grey, fontSize: 11),
+                        ),
                       ),
                     );
                   },
