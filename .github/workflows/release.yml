@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout del repositorio
@@ -31,10 +33,12 @@ jobs:
       - name: Compilar APK Debug
         run: flutter build apk --debug
 
+      - name: Renombrar APK a svfc.apk
+        run: mv build/app/outputs/flutter-apk/app-debug.apk build/app/outputs/flutter-apk/svfc.apk
+
       - name: Publicar Release en GitHub
         uses: softprops/action-gh-release@v2
         with:
           files: build/app/outputs/flutter-apk/svfc.apk
-          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
