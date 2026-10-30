@@ -15,7 +15,7 @@ import 'package:timezone/timezone.dart' as tz;
 // ============================================================================
 // CONFIGURACIÓN DE ACCESOS, GITHUB Y VERSIÓN UNIFICADA
 // ============================================================================
-String gAppVersion = '1.0.15';
+String gAppVersion = '1.0.16';
 const String kGitHubUser = 'DemianGodOk';
 const String kGitHubRepo = 'Fulbito';
 
@@ -3185,28 +3185,61 @@ class _TablaScreenState extends State<TablaScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SegmentedButton<int>(
-                  showSelectedIcon: false,
-                  style: SegmentedButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white12),
                   ),
-                  segments: const [
-                    ButtonSegment(
-                        value: 0,
-                        label: Text('Posiciones', style: TextStyle(fontSize: 12)),
-                        icon: Icon(Icons.format_list_numbered, size: 16)),
-                    ButtonSegment(
-                        value: 1,
-                        label: Text('Partidos', style: TextStyle(fontSize: 12)),
-                        icon: Icon(Icons.history, size: 16)),
-                    ButtonSegment(
-                        value: 2,
-                        label: Text('Estadísticas', style: TextStyle(fontSize: 12)),
-                        icon: Icon(Icons.query_stats, size: 16)),
-                  ],
-                  selected: {_vistaSeleccionada},
-                  onSelectionChanged: (val) => setState(() => _vistaSeleccionada = val.first),
+                  child: Row(
+                    children: [
+                      {'id': 0, 'label': 'Posiciones', 'icon': Icons.format_list_numbered, 'flex': 11},
+                      {'id': 1, 'label': 'Partidos', 'icon': Icons.history, 'flex': 10},
+                      {'id': 2, 'label': 'Estadísticas', 'icon': Icons.query_stats, 'flex': 14},
+                    ].map((tab) {
+                      final int id = tab['id'] as int;
+                      final bool seleccionado = _vistaSeleccionada == id;
+                      return Expanded(
+                        flex: tab['flex'] as int,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () => setState(() => _vistaSeleccionada = id),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                            decoration: BoxDecoration(
+                              color: seleccionado
+                                  ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.3)
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    tab['icon'] as IconData,
+                                    size: 15,
+                                    color: seleccionado ? Colors.lightBlueAccent : Colors.grey,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    tab['label'] as String,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: seleccionado ? FontWeight.bold : FontWeight.normal,
+                                      color: seleccionado ? Colors.white : Colors.grey,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 if (_vistaSeleccionada == 0) ...[
