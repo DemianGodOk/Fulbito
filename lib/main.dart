@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -13,9 +13,9 @@ import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
 // ============================================================================
-// CONFIGURACIÃ“N DE ACCESOS, GITHUB Y VERSIÃ“N
+// CONFIGURACIÓN DE ACCESOS, GITHUB Y VERSIÓN
 // ============================================================================
-const String kAppVersion = '1.0.7';
+const String kAppVersion = '1.0.8';
 const String kGitHubUser = 'DemianGodOk';
 const String kGitHubRepo = 'Fulbito';
 
@@ -81,8 +81,8 @@ Future<void> programarRecordatorioAsistencia({
   try {
     await flutterLocalNotificationsPlugin.zonedSchedule(
       id: 900,
-      title: 'âš½ Recordatorio de Asistencia S.V.F.C.',
-      body: 'RecordÃ¡ confirmar si jugÃ¡s el $partidoTexto.',
+      title: '⚽ Recordatorio de Asistencia S.V.F.C.',
+      body: 'Recordá confirmar si jugás el $partidoTexto.',
       scheduledDate: tz.TZDateTime.from(fechaHora, tz.local),
       notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
@@ -139,11 +139,11 @@ String limpiarNombre(String? raw) {
 String _normalizar(String s) {
   var res = limpiarNombre(s).trim().toLowerCase();
   res = res
-      .replaceAll('Ã¡', 'a')
-      .replaceAll('Ã©', 'e')
-      .replaceAll('Ã­', 'i')
-      .replaceAll('Ã³', 'o')
-      .replaceAll('Ãº', 'u');
+      .replaceAll('á', 'a')
+      .replaceAll('é', 'e')
+      .replaceAll('í', 'i')
+      .replaceAll('ó', 'o')
+      .replaceAll('ú', 'u');
   return res;
 }
 
@@ -169,7 +169,7 @@ bool sonElMismoJugador(String nombreA, String nombreB) {
 }
 
 String formatearFechaEspanol(DateTime date) {
-  const dias = ['Lunes', 'Martes', 'MiÃ©rcoles', 'Jueves', 'Viernes', 'SÃ¡bado', 'Domingo'];
+  const dias = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
   const meses = [
     'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
@@ -247,17 +247,17 @@ Future<void> verificarActualizacionGitHub(BuildContext context) async {
             children: [
               Icon(Icons.system_update, color: Colors.tealAccent),
               SizedBox(width: 8),
-              Text('ActualizaciÃ³n disponible', style: TextStyle(fontSize: 18)),
+              Text('Actualización disponible', style: TextStyle(fontSize: 18)),
             ],
           ),
           content: Text(
-            'Hay una nueva versiÃ³n ($versionRemota) de S.V.F.C.\nTu versiÃ³n instalada: $versionActual.\n\nÂ¿QuerÃ©s descargar e instalar la nueva versiÃ³n ahora?',
+            'Hay una nueva versión ($versionRemota) de S.V.F.C.\nTu versión instalada: $versionActual.\n\n¿Querés descargar e instalar la nueva versión ahora?',
             style: const TextStyle(height: 1.4),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('MÃ¡s tarde', style: TextStyle(color: Colors.grey)),
+              child: const Text('Más tarde', style: TextStyle(color: Colors.grey)),
             ),
             FilledButton.icon(
               icon: const Icon(Icons.download, size: 18),
@@ -274,7 +274,7 @@ Future<void> verificarActualizacionGitHub(BuildContext context) async {
       );
     }
   } catch (e) {
-    debugPrint("Error al verificar actualizaciÃ³n en GitHub: $e");
+    debugPrint("Error al verificar actualización en GitHub: $e");
   }
 }
 
@@ -336,7 +336,7 @@ class FulbitoApp extends StatelessWidget {
   }
 }
 
-/// Control de sesiÃ³n
+/// Control de sesión
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
 
@@ -373,7 +373,7 @@ class _AuthGateState extends State<AuthGate> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al iniciar sesiÃ³n: $e'), backgroundColor: Colors.redAccent),
+          SnackBar(content: Text('Error al iniciar sesión: $e'), backgroundColor: Colors.redAccent),
         );
       }
     } finally {
@@ -452,7 +452,7 @@ class LoginScreen extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'GestiÃ³n de partidos, prioridades de rotaciÃ³n y camisetas.',
+                'Gestión de partidos, prioridades de rotación y camisetas.',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 15, color: Colors.grey[400], height: 1.4),
               ),
@@ -477,7 +477,7 @@ class LoginScreen extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               Text(
-                'VersiÃ³n $kAppVersion',
+                'Versión $kAppVersion',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 12, color: Colors.grey[600]),
               ),
@@ -574,8 +574,8 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                   !sonElMismoJugador(nombreBaja, widget.nombreJugador)) {
                 mostrarNotificacion(
                   id: 101,
-                  titulo: 'âš ï¸ Jugador dado de baja',
-                  cuerpo: '$nombreBaja avisÃ³ que no juega este partido.',
+                  titulo: '⚠️ Jugador dado de baja',
+                  cuerpo: '$nombreBaja avisó que no juega este partido.',
                 );
               }
             }
@@ -617,7 +617,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
     await batch.commit();
   }
 
-  /// Revisa si el partido ya pasÃ³ (a partir de las 00:00 hs del dÃ­a siguiente) y corre la fecha 7 dÃ­as
+  /// Revisa si el partido ya pasó (a partir de las 00:00 hs del día siguiente) y corre la fecha 7 días
   void _verificarYActualizarSemanaPartido(Map<String, dynamic> datosPartido) async {
     if (_verificandoSemana) return;
 
@@ -668,7 +668,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
           ],
         ),
         content: const Text(
-          'Esta acciÃ³n borrarÃ¡ todas las confirmaciones y bajas actuales. Todos los jugadores volverÃ¡n a quedar "Sin responder".\n\nÂ¿Deseas continuar?',
+          'Esta acción borrará todas las confirmaciones y bajas actuales. Todos los jugadores volverán a quedar "Sin responder".\n\n¿Deseas continuar?',
           style: TextStyle(height: 1.4),
         ),
         actions: [
@@ -684,7 +684,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('Convocatoria reseteada con Ã©xito.'),
+                    content: Text('Convocatoria reseteada con éxito.'),
                     backgroundColor: Colors.teal,
                   ),
                 );
@@ -707,7 +707,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
   void _mostrarDialogoConfiguracion(BuildContext context, Map<String, dynamic> datosActuales) {
     final diaCtrl = TextEditingController(text: datosActuales['dia'] ?? 'Viernes 30 de Octubre');
     final horaCtrl = TextEditingController(text: datosActuales['hora'] ?? '20:00 hs');
-    final lugarCtrl = TextEditingController(text: datosActuales['lugar'] ?? 'EstaciÃ³n 98 - Cancha 2');
+    final lugarCtrl = TextEditingController(text: datosActuales['lugar'] ?? 'Estación 98 - Cancha 2');
     final cupoCtrl = TextEditingController(text: '${datosActuales['cupoMaximo'] ?? 10}');
 
     final recDiaCtrl = TextEditingController(text: datosActuales['recordatorioDia'] ?? 'Jueves anterior');
@@ -781,7 +781,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                 TextField(
                   controller: lugarCtrl,
                   decoration: const InputDecoration(
-                      labelText: 'Cancha / DirecciÃ³n', prefixIcon: Icon(Icons.location_on_outlined, size: 20)),
+                      labelText: 'Cancha / Dirección', prefixIcon: Icon(Icons.location_on_outlined, size: 20)),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -796,7 +796,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                   children: [
                     Icon(Icons.alarm, color: Colors.tealAccent, size: 18),
                     SizedBox(width: 8),
-                    Text('Recordatorio de ConfirmaciÃ³n',
+                    Text('Recordatorio de Confirmación',
                         style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.tealAccent)),
                   ],
                 ),
@@ -819,7 +819,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                     }
                   },
                   decoration: const InputDecoration(
-                    labelText: 'DÃ­a del Recordatorio',
+                    labelText: 'Día del Recordatorio',
                     prefixIcon: Icon(Icons.calendar_today, size: 18),
                     suffixIcon: Icon(Icons.arrow_drop_down),
                   ),
@@ -893,7 +893,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
         final infoPartido = (snapshotPartido.data?.data() as Map<String, dynamic>?) ?? {
           'dia': 'Viernes 30 de Octubre',
           'hora': '20:00 hs',
-          'lugar': 'EstaciÃ³n 98 - Cancha 2',
+          'lugar': 'Estación 98 - Cancha 2',
           'cupoMaximo': 10,
         };
 
@@ -1065,7 +1065,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                           children: [
                             Icon(Icons.logout, size: 18, color: Colors.redAccent),
                             SizedBox(width: 8),
-                            Text('Cerrar sesiÃ³n', style: TextStyle(color: Colors.redAccent)),
+                            Text('Cerrar sesión', style: TextStyle(color: Colors.redAccent)),
                           ],
                         ),
                       ),
@@ -1075,7 +1075,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                         height: 26,
                         child: Center(
                           child: Text(
-                            'VersiÃ³n $_versionDinamica',
+                            'Versión $_versionDinamica',
                             style: const TextStyle(fontSize: 11, color: Colors.grey),
                           ),
                         ),
@@ -1101,7 +1101,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                   NavigationDestination(
                       icon: Icon(Icons.sync_alt_outlined),
                       selectedIcon: Icon(Icons.sync_alt),
-                      label: 'RotaciÃ³n'),
+                      label: 'Rotación'),
                 ],
               ),
             );
@@ -1160,7 +1160,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
     setState(() => _guardando = false);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Plantel guardado con Ã©xito.'), backgroundColor: Colors.teal),
+        const SnackBar(content: Text('Plantel guardado con éxito.'), backgroundColor: Colors.teal),
       );
     }
   }
@@ -1189,7 +1189,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                 runSpacing: 8,
                 children: [
                   ChoiceChip(
-                    label: const Text('Titular (RotaciÃ³n)'),
+                    label: const Text('Titular (Rotación)'),
                     selected: esTitular,
                     onSelected: (val) => setDlgState(() => esTitular = true),
                   ),
@@ -1251,7 +1251,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
           width: double.maxFinite,
           child: usuariosRegistrados.isEmpty
               ? const Text(
-                  'AÃºn no hay usuarios de Google registrados. Se registran automÃ¡ticamente al iniciar sesiÃ³n.')
+                  'Aún no hay usuarios de Google registrados. Se registran automáticamente al iniciar sesión.')
               : ListView.builder(
                   shrinkWrap: true,
                   itemCount: usuariosRegistrados.length,
@@ -1325,7 +1325,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('GestiÃ³n de Plantel', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        title: const Text('Gestión de Plantel', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
         actions: [
           if (_guardando)
             const Center(
@@ -1361,10 +1361,10 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('Titulares en RotaciÃ³n (${_titulares.length})',
+                      Text('Titulares en Rotación (${_titulares.length})',
                           style: const TextStyle(
                               fontSize: 16, fontWeight: FontWeight.bold, color: Colors.greenAccent)),
-                      const Text('Arriba = mÃ¡s prioridad', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                      const Text('Arriba = más prioridad', style: TextStyle(fontSize: 11, color: Colors.grey)),
                     ],
                   ),
                   const SizedBox(height: 6),
@@ -1374,7 +1374,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                       child: const Padding(
                         padding: EdgeInsets.all(16.0),
                         child: Center(
-                            child: Text('No hay titulares cargados. UsÃ¡ el botÃ³n para agregarlos.',
+                            child: Text('No hay titulares cargados. Usá el botón para agregarlos.',
                                 style: TextStyle(color: Colors.grey))),
                       ),
                     )
@@ -1680,7 +1680,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
   Widget build(BuildContext context) {
     final dia = widget.infoPartido['dia'] ?? 'Viernes 30 de Octubre';
     final hora = widget.infoPartido['hora'] ?? '20:00 hs';
-    final lugar = widget.infoPartido['lugar'] ?? 'EstaciÃ³n 98 - Cancha 2';
+    final lugar = widget.infoPartido['lugar'] ?? 'Estación 98 - Cancha 2';
     final int cupoMaximo = widget.infoPartido['cupoMaximo'] ?? 10;
 
     return StreamBuilder<QuerySnapshot>(
@@ -1782,14 +1782,14 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
           if (!_jugabaEnUltimoCalculo! && juegoAhora) {
             mostrarNotificacion(
               id: 102,
-              titulo: 'âš½ Â¡Entraste al equipo!',
-              cuerpo: 'Se liberÃ³ un cupo y quedaste confirmado entre los 10 titulares.',
+              titulo: '⚽ ¡Entraste al equipo!',
+              cuerpo: 'Se liberó un cupo y quedaste confirmado entre los 10 titulares.',
             );
           } else if (_jugabaEnUltimoCalculo! && !juegoAhora && miEstado == 'confirmado') {
             mostrarNotificacion(
               id: 103,
-              titulo: 'â³ Pasaste a lista de espera',
-              cuerpo: 'Un titular con prioridad confirmÃ³ su asistencia.',
+              titulo: '⏳ Pasaste a lista de espera',
+              cuerpo: 'Un titular con prioridad confirmó su asistencia.',
             );
           }
         }
@@ -1801,7 +1801,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
             final listaNombres = titularesConfirmados.map((j) => j.nombre).join(', ');
             mostrarNotificacion(
               id: 104,
-              titulo: 'âœ… Â¡Se completÃ³ el equipo!',
+              titulo: '✅ ¡Se completó el equipo!',
               cuerpo: 'Plantel confirmado ($cupoMaximo): $listaNombres',
             );
           }
@@ -1835,7 +1835,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                                     fontWeight: FontWeight.bold,
                                     fontSize: 12)),
                           ),
-                          Text('FÃºtbol ${(cupoMaximo / 2).round()}',
+                          Text('Fútbol ${(cupoMaximo / 2).round()}',
                               style: const TextStyle(color: Colors.grey, fontSize: 13)),
                         ],
                       ),
@@ -1882,7 +1882,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                       if (prioritariosPendientes.isNotEmpty) ...[
                         const SizedBox(height: 8),
                         Text(
-                          'Hay ${prioritariosPendientes.length} titular(es) con cupo reservado que todavÃ­a no respondieron.',
+                          'Hay ${prioritariosPendientes.length} titular(es) con cupo reservado que todavía no respondieron.',
                           style: const TextStyle(fontSize: 11, color: Colors.amberAccent),
                         ),
                       ],
@@ -1899,7 +1899,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Â¿JugÃ¡s esta semana?',
+                      const Text('¿Jugás esta semana?',
                           style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 10),
                       Row(
@@ -1955,7 +1955,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
               if (titularesConfirmados.isEmpty)
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 8.0),
-                  child: Text('AÃºn no hay jugadores asegurados.', style: TextStyle(color: Colors.grey)),
+                  child: Text('Aún no hay jugadores asegurados.', style: TextStyle(color: Colors.grey)),
                 )
               else
                 ListView.builder(
@@ -1999,7 +1999,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
                                     color: Colors.blueAccent, borderRadius: BorderRadius.circular(4)),
-                                child: const Text('TÃº',
+                                child: const Text('Tú',
                                     style: TextStyle(
                                         fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
                               ),
@@ -2075,7 +2075,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
                                     color: Colors.blueAccent, borderRadius: BorderRadius.circular(4)),
-                                child: const Text('TÃº',
+                                child: const Text('Tú',
                                     style: TextStyle(
                                         fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
                               ),
@@ -2092,7 +2092,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
-                              '${index + 1}Â° en cola',
+                              '${index + 1}° en cola',
                               style: const TextStyle(
                                   fontSize: 11, color: Colors.orangeAccent, fontWeight: FontWeight.bold),
                             ),
@@ -2131,11 +2131,11 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                     IconData icono;
 
                     if (esTitularPrioritario) {
-                      subtitulo = 'Cupo reservado por rotaciÃ³n';
+                      subtitulo = 'Cupo reservado por rotación';
                       colorSubtitulo = Colors.amberAccent;
                       icono = Icons.shield_outlined;
                     } else if (esTitularEnRiesgo) {
-                      subtitulo = 'Cupo sujeto a disponibilidad por rotaciÃ³n';
+                      subtitulo = 'Cupo sujeto a disponibilidad por rotación';
                       colorSubtitulo = Colors.orangeAccent;
                       icono = Icons.swap_vert;
                     } else {
@@ -2214,7 +2214,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
   }
 }
 
-/// Segunda pestaÃ±a: Tabla de Posiciones y Carga de Resultado
+/// Segunda pestaña: Tabla de Posiciones y Carga de Resultado
 class TablaScreen extends StatefulWidget {
   final bool esAdmin;
   final bool puedeCargarResultado;
@@ -2369,7 +2369,7 @@ class _TablaScreenState extends State<TablaScreen> {
                     ],
                   ),
                   const SizedBox(height: 20),
-                  const Text('Asignar Equipos (Blanco âž” Negro âž” Quitar)',
+                  const Text('Asignar Equipos (Blanco ➔ Negro ➔ Quitar)',
                       style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
                   const SizedBox(height: 10),
                   Wrap(
@@ -2405,7 +2405,7 @@ class _TablaScreenState extends State<TablaScreen> {
                   const SizedBox(height: 24),
                   FilledButton.icon(
                     icon: const Icon(Icons.save),
-                    label: const Text('Guardar Partido y Actualizar RotaciÃ³n'),
+                    label: const Text('Guardar Partido y Actualizar Rotación'),
                     onPressed: () async {
                       final int golesA = int.tryParse(golesACtrl.text.trim()) ?? 0;
                       final int golesB = int.tryParse(golesBCtrl.text.trim()) ?? 0;
@@ -2539,7 +2539,7 @@ class _TablaScreenState extends State<TablaScreen> {
                       child: const Padding(
                         padding: EdgeInsets.all(24.0),
                         child:
-                            Center(child: Text('AÃºn no hay partidos cargados.', style: TextStyle(color: Colors.grey))),
+                            Center(child: Text('Aún no hay partidos cargados.', style: TextStyle(color: Colors.grey))),
                       ),
                     )
                   else ...[
@@ -2796,7 +2796,7 @@ class _TablaScreenState extends State<TablaScreen> {
   }
 }
 
-/// Tercera pestaÃ±a: Lista de RotaciÃ³n en Verde y Rojo + Camisetas
+/// Tercera pestaña: Lista de Rotación en Verde y Rojo + Camisetas
 class RotacionScreen extends StatelessWidget {
   final bool esAdmin;
   final List<Jugador> titulares;
@@ -2815,7 +2815,7 @@ class RotacionScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Â¿QuiÃ©n tiene las camisetas?'),
+        title: const Text('¿Quién tiene las camisetas?'),
         content: SizedBox(
           width: double.maxFinite,
           child: ListView.builder(
@@ -2861,10 +2861,10 @@ class RotacionScreen extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text('Reordenar Lista de RotaciÃ³n',
+                const Text('Reordenar Lista de Rotación',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
-                const Text('MantenÃ© presionado y arrastrÃ¡ para cambiar el orden de prioridad.',
+                const Text('Mantené presionado y arrastrá para cambiar el orden de prioridad.',
                     style: TextStyle(fontSize: 12, color: Colors.grey)),
                 const SizedBox(height: 16),
                 SizedBox(
@@ -2970,13 +2970,13 @@ class RotacionScreen extends StatelessWidget {
                             children: [
                               Icon(Icons.dry_cleaning, color: Colors.lightBlueAccent, size: 22),
                               SizedBox(width: 8),
-                              Text('RotaciÃ³n de Camisetas',
+                              Text('Rotación de Camisetas',
                                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                             ],
                           ),
                           if (esAdmin)
                             IconButton(
-                              tooltip: 'Seleccionar quiÃ©n las tiene',
+                              tooltip: 'Seleccionar quién las tiene',
                               icon: const Icon(Icons.edit, size: 18, color: Colors.lightBlueAccent),
                               onPressed: () => _abrirSelectorCamisetas(
                                   context, listaCamisetasAlfabeticas, nombreVisibleLasTiene),
@@ -3066,7 +3066,7 @@ class RotacionScreen extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Lista de RotaciÃ³n',
+                  const Text('Lista de Rotación',
                       style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
                   if (esAdmin)
                     Row(
@@ -3121,7 +3121,7 @@ class RotacionScreen extends StatelessWidget {
                   child: const Padding(
                     padding: EdgeInsets.all(14.0),
                     child: Center(
-                        child: Text('No hay titulares en rotaciÃ³n. AndÃ¡ a "Plantel" para cargarlos.',
+                        child: Text('No hay titulares en rotación. Andá a "Plantel" para cargarlos.',
                             style: TextStyle(color: Colors.grey))),
                   ),
                 )
@@ -3176,7 +3176,7 @@ class RotacionScreen extends StatelessWidget {
               if (rojos.isEmpty)
                 const Padding(
                   padding: EdgeInsets.all(8.0),
-                  child: Text('No hay jugadores en riesgo de rotaciÃ³n.',
+                  child: Text('No hay jugadores en riesgo de rotación.',
                       style: TextStyle(color: Colors.grey, fontSize: 12)),
                 )
               else
@@ -3206,7 +3206,7 @@ class RotacionScreen extends StatelessWidget {
                         title: Text(jugador,
                             style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white70)),
                         trailing: Text(
-                          '${index + 1}Â° en entrar si hay baja',
+                          '${index + 1}° en entrar si hay baja',
                           style: const TextStyle(
                               fontSize: 11, color: Colors.redAccent, fontWeight: FontWeight.bold),
                         ),

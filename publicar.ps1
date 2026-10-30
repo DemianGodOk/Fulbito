@@ -1,8 +1,10 @@
-﻿$pubspecPath = "pubspec.yaml"
+$pubspecPath = "pubspec.yaml"
 $mainPath = "lib/main.dart"
 
+$utf8SinBom = New-Object System.Text.UTF8Encoding($false)
+
 # 1. Leer y subir versión en pubspec.yaml
-$content = Get-Content $pubspecPath -Raw
+$content = [System.IO.File]::ReadAllText($pubspecPath, [System.Text.Encoding]::UTF8)
 if ($content -match 'version:\s*(\d+)\.(\d+)\.(\d+)\+(\d+)') {
     $major = $matches[1]
     $minor = $matches[2]
@@ -12,18 +14,18 @@ if ($content -match 'version:\s*(\d+)\.(\d+)\.(\d+)\+(\d+)') {
     $newVersionFull = "$newVersion+$build"
     
     $content = $content -replace 'version:\s*(\d+)\.(\d+)\.(\d+)\+(\d+)', "version: $newVersionFull"
-    Set-Content -Path $pubspecPath -Value $content -NoNewline -Encoding UTF8
+    [System.IO.File]::WriteAllText($pubspecPath, $content, $utf8SinBom)
     Write-Host ">> Version incrementada a $newVersionFull" -ForegroundColor Green
 } else {
     Write-Host "Error: No se encontro el formato de version en pubspec.yaml" -ForegroundColor Red
     exit 1
 }
 
-# 2. Sincronizar kAppVersion en main.dart
+# 2. Sincronizar kAppVersion en main.dart respetando UTF-8
 if (Test-Path $mainPath) {
-    $mainContent = Get-Content $mainPath -Raw
+    $mainContent = [System.IO.File]::ReadAllText($mainPath, [System.Text.Encoding]::UTF8)
     $mainContent = $mainContent -replace "const String kAppVersion = '.*?';", "const String kAppVersion = '$newVersion';"
-    Set-Content -Path $mainPath -Value $mainContent -NoNewline -Encoding UTF8
+    [System.IO.File]::WriteAllText($mainPath, $mainContent, $utf8SinBom)
     Write-Host ">> kAppVersion actualizada a '$newVersion' en main.dart" -ForegroundColor Green
 }
 
