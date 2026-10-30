@@ -27,6 +27,11 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: Configurar clave fija de firma
+        run: |
+          mkdir -p ~/.android
+          cp android/app/debug.keystore ~/.android/debug.keystore
+
       - name: Instalar dependencias
         run: flutter pub get
 
