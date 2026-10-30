@@ -15,7 +15,7 @@ import 'package:timezone/timezone.dart' as tz;
 // ============================================================================
 // CONFIGURACIÃ“N DE ACCESOS, GITHUB Y VERSIÃ“N
 // ============================================================================
-const String kAppVersion = '1.0.5';
+const String kAppVersion = '1.0.6';
 const String kGitHubUser = 'DemianGodOk';
 const String kGitHubRepo = 'Fulbito';
 
