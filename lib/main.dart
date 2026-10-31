@@ -18,7 +18,7 @@ import 'package:url_launcher/url_launcher.dart';
 // CONFIGURACIÓN DE ACCESOS, GITHUB Y VERSIÓN UNIFICADA
 // ============================================================================
 
-String gAppVersion = '1.0.17';
+String gAppVersion = '1.0.18';
 const String kGitHubUser = 'DemianGodOk';
 const String kGitHubRepo = 'Fulbito';
 const String kNombreTorneo = 'Torneo Fulbito';
