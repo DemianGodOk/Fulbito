@@ -15,10 +15,10 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:url_launcher/url_launcher.dart';
 
 // ============================================================================
-// CONFIGURACIÓN DE ACCESOS, GITHUB Y VERSIÓN UNIFICADA
+// CONFIGURACIÓN GENERAL
 // ============================================================================
 
-String gAppVersion = '1.0.18';
+String gAppVersion = '1.0.19';
 const String kGitHubUser = 'DemianGodOk';
 const String kGitHubRepo = 'Fulbito';
 const String kNombreTorneo = 'Torneo Fulbito';
@@ -27,7 +27,7 @@ const bool kBypassLogin = false;
 const String kSuperAdminEmail = 'demian.soriano@gmail.com';
 
 // ============================================================================
-// SERVICIO DE NOTIFICACIONES LOCALES
+// NOTIFICACIONES LOCALES
 // ============================================================================
 
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
@@ -56,6 +56,7 @@ Future<void> mostrarNotificacion({
   required String cuerpo,
 }) async {
   if (kIsWeb) return;
+
   const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
     'fulbito_notif_channel',
     'Avisos de Partidos',
@@ -66,6 +67,7 @@ Future<void> mostrarNotificacion({
   );
 
   const NotificationDetails details = NotificationDetails(android: androidDetails);
+
   await flutterLocalNotificationsPlugin.show(
     id,
     titulo,
@@ -149,7 +151,10 @@ String limpiarNombre(String? raw) {
   return limpio;
 }
 
-String sanitizarNombreUsuario({String? nombre, String? email}) {
+String sanitizarNombreUsuario({
+  String? nombre,
+  String? email,
+}) {
   final nombreLimpio = limpiarNombre(nombre);
   if (nombreLimpio.isNotEmpty) {
     return nombreLimpio;
@@ -159,9 +164,8 @@ String sanitizarNombreUsuario({String? nombre, String? email}) {
   if (emailLimpio.contains('@')) {
     final localPart = emailLimpio.split('@').first.trim();
     if (localPart.isNotEmpty) {
-      final parte = localPart[0].toUpperCase() +
+      return localPart[0].toUpperCase() +
           (localPart.length > 1 ? localPart.substring(1).toLowerCase() : '');
-      return parte;
     }
   }
 
@@ -169,13 +173,11 @@ String sanitizarNombreUsuario({String? nombre, String? email}) {
 }
 
 String nombreLegibleUsuario(Map<String, dynamic> u) {
-  final String raw = (u['nombre'] ?? '').toString();
-  final String limpio = limpiarNombre(raw);
-  if (limpio.isNotEmpty) {
-    return limpio;
-  }
+  final raw = (u['nombre'] ?? '').toString();
+  final limpio = limpiarNombre(raw);
+  if (limpio.isNotEmpty) return limpio;
 
-  final String email = (u['email'] ?? '').toString().trim();
+  final email = (u['email'] ?? '').toString().trim();
   if (email.contains('@')) {
     final pre = email.split('@').first.trim();
     if (pre.isNotEmpty) {
@@ -331,17 +333,19 @@ bool _esVersionMayor(String nueva, String actual) {
       nueva.split('.').map((e) => int.tryParse(e) ?? 0).toList();
   final List<int> vActual =
       actual.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+
   for (int i = 0; i < 3; i++) {
     final int n = i < vNueva.length ? vNueva[i] : 0;
     final int a = i < vActual.length ? vActual[i] : 0;
     if (n > a) return true;
     if (n < a) return false;
   }
+
   return false;
 }
 
 // ============================================================================
-// VERIFICACIÓN Y ACTUALIZACIÓN OTA NATIVA
+// ACTUALIZACIÓN OTA DESDE GITHUB
 // ============================================================================
 
 Future<void> verificarActualizacionGitHub(BuildContext context) async {
@@ -353,7 +357,7 @@ Future<void> verificarActualizacionGitHub(BuildContext context) async {
       Uri.parse('https://api.github.com/repos/$kGitHubUser/$kGitHubRepo/releases/latest'),
       headers: {
         'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'FulbitoApp'
+        'User-Agent': 'FulbitoApp',
       },
     );
 
@@ -439,7 +443,8 @@ void _mostrarDialogoDescargaEInstalacion(
                       descargando = false;
                       break;
                     default:
-                      errorTexto = 'No se pudo completar la descarga (${event.status}).';
+                      errorTexto =
+                          'No se pudo completar la descarga (${event.status}).';
                       descargando = false;
                       break;
                   }
@@ -605,7 +610,6 @@ class FulbitoApp extends StatelessWidget {
   }
 }
 
-/// Control de sesión
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
 
@@ -618,6 +622,7 @@ class _AuthGateState extends State<AuthGate> {
 
   Future<void> _iniciarSesionGoogle() async {
     setState(() => _cargando = true);
+
     try {
       final GoogleAuthProvider googleProvider = GoogleAuthProvider();
       googleProvider.addScope('email');
@@ -653,7 +658,7 @@ class _AuthGateState extends State<AuthGate> {
               'nombre': nombreGuardar,
               'email': user.email ?? '',
               'timestamp': FieldValue.serverTimestamp(),
-            }
+            },
           }, SetOptions(merge: true));
         }
       }
@@ -667,7 +672,9 @@ class _AuthGateState extends State<AuthGate> {
         );
       }
     } finally {
-      if (mounted) setState(() => _cargando = false);
+      if (mounted) {
+        setState(() => _cargando = false);
+      }
     }
   }
 
@@ -712,9 +719,9 @@ class _AuthGateState extends State<AuthGate> {
   }
 }
 
-/// Login
 class LoginScreen extends StatelessWidget {
   final VoidCallback onLogin;
+
   const LoginScreen({super.key, required this.onLogin});
 
   @override
@@ -799,11 +806,12 @@ class LoginScreen extends StatelessWidget {
 }
 
 // ============================================================================
-// VESTUARIO (CHAT TEMPORAL 24 HORAS EN DOCUMENTO ÚNICO)
+// VESTUARIO
 // ============================================================================
 
 class VestuarioScreen extends StatefulWidget {
   final String aliasUsuario;
+
   const VestuarioScreen({super.key, required this.aliasUsuario});
 
   @override
@@ -825,6 +833,7 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
   void _enviarMensaje() async {
     final txt = _ctrl.text.trim();
     if (txt.isEmpty || _enviando) return;
+
     setState(() => _enviando = true);
     _ctrl.clear();
 
@@ -875,7 +884,9 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
     } catch (e) {
       debugPrint('Error al enviar mensaje en vestuario: $e');
     } finally {
-      if (mounted) setState(() => _enviando = false);
+      if (mounted) {
+        setState(() => _enviando = false);
+      }
     }
   }
 
@@ -950,7 +961,7 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
               final data = snap.data?.data() as Map<String, dynamic>? ?? {};
               final limite24hs =
                   DateTime.now().subtract(const Duration(hours: 24)).millisecondsSinceEpoch;
-              final List<dynamic> rawMensajes = (data['mensajes'] as List<dynamic>? ?? []);
+              final List<dynamic> rawMensajes = data['mensajes'] as List<dynamic>? ?? [];
 
               final List<dynamic> mensajes = [];
               for (final m in rawMensajes) {
@@ -1182,6 +1193,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
     _ultimoRegistroNotificado = DateTime.now();
     _ultimoCambioAsistenciaNotificado = DateTime.now();
     _ultimoVestuarioNotificado = DateTime.now();
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       verificarActualizacionGitHub(context);
     });
@@ -1219,8 +1231,9 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
 
     DateTime? fechaPartido;
     if (datosPartido['fechaMillis'] != null) {
-      fechaPartido =
-          DateTime.fromMillisecondsSinceEpoch(datosPartido['fechaMillis'] as int);
+      fechaPartido = DateTime.fromMillisecondsSinceEpoch(
+        datosPartido['fechaMillis'] as int,
+      );
     } else if (datosPartido['dia'] != null) {
       fechaPartido = _parsearFechaEspanol(datosPartido['dia'].toString());
     }
@@ -1235,10 +1248,10 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
       try {
         DateTime nuevaFecha = fechaPartido.add(const Duration(days: 7));
         while (DateTime(
-                nuevaFecha.year,
-                nuevaFecha.month,
-                nuevaFecha.day + 1)
-            .isBefore(DateTime.now())) {
+          nuevaFecha.year,
+          nuevaFecha.month,
+          nuevaFecha.day + 1,
+        ).isBefore(DateTime.now())) {
           nuevaFecha = nuevaFecha.add(const Duration(days: 7));
         }
 
@@ -1316,22 +1329,31 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
     BuildContext context,
     Map<String, dynamic> datosActuales,
   ) {
-    final diaCtrl = TextEditingController(text: datosActuales['dia'] ?? 'Viernes 30 de Octubre');
-    final horaCtrl = TextEditingController(text: datosActuales['hora'] ?? '20:00 hs');
-    final lugarCtrl = TextEditingController(text: datosActuales['lugar'] ?? 'Estación 98 - Cancha 2');
-    final mapsUrlCtrl = TextEditingController(text: datosActuales['mapsUrl'] ?? '');
-    final cupoCtrl = TextEditingController(text: '${datosActuales['cupoMaximo'] ?? 10}');
+    final diaCtrl = TextEditingController(
+        text: datosActuales['dia'] ?? 'Viernes 30 de Octubre');
+    final horaCtrl =
+        TextEditingController(text: datosActuales['hora'] ?? '20:00 hs');
+    final lugarCtrl = TextEditingController(
+        text: datosActuales['lugar'] ?? 'Estación 98 - Cancha 2');
+    final mapsUrlCtrl =
+        TextEditingController(text: (datosActuales['mapsUrl'] ?? '').toString());
+    final cupoCtrl =
+        TextEditingController(text: '${datosActuales['cupoMaximo'] ?? 10}');
 
-    final recDiaCtrl = TextEditingController(text: datosActuales['recordatorioDia'] ?? 'Jueves anterior');
-    final recHoraCtrl = TextEditingController(text: datosActuales['recordatorioHora'] ?? '10:00 hs');
+    final recDiaCtrl = TextEditingController(
+        text: datosActuales['recordatorioDia'] ?? 'Jueves anterior');
+    final recHoraCtrl = TextEditingController(
+        text: datosActuales['recordatorioHora'] ?? '10:00 hs');
 
     DateTime fechaPartidoSeleccionada = datosActuales['fechaMillis'] != null
         ? DateTime.fromMillisecondsSinceEpoch(datosActuales['fechaMillis'] as int)
         : (_parsearFechaEspanol(datosActuales['dia'] ?? '') ?? DateTime.now());
 
     DateTime fechaRecordatorioSeleccionada = datosActuales['recordatorioMillis'] != null
-        ? DateTime.fromMillisecondsSinceEpoch(datosActuales['recordatorioMillis'] as int)
+        ? DateTime.fromMillisecondsSinceEpoch(
+            datosActuales['recordatorioMillis'] as int)
         : DateTime.now().add(const Duration(days: 1));
+
     TimeOfDay horaRecordatorioSeleccionada = const TimeOfDay(hour: 10, minute: 0);
 
     showDialog(
@@ -1559,7 +1581,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
             }
 
             final todos = [...titulares, ...suplentes];
-            final String aliasUsuario = resolverAliasOPrimerNombre(
+            final aliasUsuario = resolverAliasOPrimerNombre(
               nombreGoogle: widget.nombreJugador,
               emailGoogle: widget.emailJugador,
               uidGoogle: FirebaseAuth.instance.currentUser?.uid,
@@ -1572,7 +1594,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                 final ts = (alerta['timestamp'] as Timestamp?)?.toDate();
                 if (ts != null && ts.isAfter(_ultimaAlertaNotificada)) {
                   _ultimaAlertaNotificada = ts;
-                  final String nombreAlerta = (alerta['nombre'] ?? '').toString();
+                  final nombreAlerta = (alerta['nombre'] ?? '').toString();
                   if (!sonElMismoJugador(nombreAlerta, aliasUsuario)) {
                     mostrarNotificacion(
                       id: 101,
@@ -1599,6 +1621,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                       cuerpo:
                           '${alertaReg['nombre']} ($regEmail) se acaba de registrar en la app.',
                     );
+
                     if (kIsWeb && mounted) {
                       WidgetsBinding.instance.addPostFrameCallback((_) {
                         if (mounted) {
@@ -1624,6 +1647,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                 final ts = (alerta['timestamp'] as Timestamp?)?.toDate();
                 if (ts != null && ts.isAfter(_ultimoCambioAsistenciaNotificado)) {
                   _ultimoCambioAsistenciaNotificado = ts;
+
                   final nombre = (alerta['nombre'] ?? '').toString();
                   final tipo = (alerta['tipo'] ?? '').toString();
 
@@ -2089,6 +2113,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
         .map((j) => j.email.toLowerCase().trim())
         .where((e) => e.isNotEmpty)
         .toSet();
+
     final uidsOcupados = [..._titulares, ..._suplentes]
         .where((j) => j != jugador)
         .map((j) => j.uid.trim())
@@ -2102,6 +2127,8 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
       if (uid.isNotEmpty && uidsOcupados.contains(uid)) return false;
       return true;
     }).toList();
+
+    if (!mounted) return;
 
     showDialog(
       context: context,
@@ -2270,6 +2297,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
         .map((j) => j.email.toLowerCase().trim())
         .where((e) => e.isNotEmpty)
         .toSet();
+
     final uidsAsociados = todosPlantel
         .map((j) => j.uid.trim())
         .where((u) => u.isNotEmpty)
@@ -2602,7 +2630,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
 
                   const Divider(height: 32),
 
-                  // Cuentas sin asociar
+                  // Cuentas Sin Vincular
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -2755,7 +2783,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
 }
 
 // ============================================================================
-// CONVOCATORIA SCREEN
+// CONVOCATORIA
 // ============================================================================
 
 class ConvocatoriaScreen extends StatefulWidget {
@@ -2835,8 +2863,8 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
     final dia = widget.infoPartido['dia'] ?? 'Viernes 30 de Octubre';
     final hora = widget.infoPartido['hora'] ?? '20:00 hs';
     final lugar = widget.infoPartido['lugar'] ?? 'Estación 98 - Cancha 2';
-    final String mapsUrl = (widget.infoPartido['mapsUrl'] ?? '').toString().trim();
-    final int cupoMaximo = widget.infoPartido['cupoMaximo'] ?? 10;
+    final mapsUrl = (widget.infoPartido['mapsUrl'] ?? '').toString().trim();
+    final cupoMaximo = widget.infoPartido['cupoMaximo'] ?? 10;
     final Map<String, dynamic> asistencia =
         (widget.infoPartido['asistencia'] as Map<String, dynamic>?) ?? {};
 
@@ -2951,7 +2979,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                   const SizedBox(height: 6),
                   Row(
                     children: [
-                      const Icon(Icons.location_on_outlined, size: 16, color: Colors.grey),
+                      const Icon(Icons.location_on, size: 16, color: Colors.red),
                       const SizedBox(width: 4),
                       Expanded(
                         child: InkWell(
@@ -2959,7 +2987,10 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                             if (mapsUrl.isEmpty) return;
                             final uri = Uri.tryParse(mapsUrl);
                             if (uri == null) return;
-                            if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+                            if (!await launchUrl(
+                              uri,
+                              mode: LaunchMode.externalApplication,
+                            )) {
                               if (context.mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
@@ -3015,10 +3046,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                     const SizedBox(height: 8),
                     Text(
                       'Hay ${prioritariosPendientes.length} titular(es) con cupo reservado que todavía no respondieron.',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: Colors.amberAccent,
-                      ),
+                      style: const TextStyle(fontSize: 11, color: Colors.amberAccent),
                     ),
                   ],
                 ],
@@ -3444,7 +3472,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
 }
 
 // ============================================================================
-// TABLA SCREEN (POSICIONES, PARTIDOS Y ESTADÍSTICAS)
+// TABLA
 // ============================================================================
 
 class TablaScreen extends StatefulWidget {
@@ -4562,7 +4590,7 @@ class _TablaScreenState extends State<TablaScreen> {
               ],
             ),
           ),
-          floatingActionButton: widget.puedeCargarResultado
+          floatingActionButton: (_vistaSeleccionada == 1 && widget.puedeCargarResultado)
               ? FloatingActionButton.extended(
                   onPressed: () => _mostrarDialogoCargarResultado(context),
                   backgroundColor: Colors.lightBlueAccent,
@@ -4581,7 +4609,7 @@ class _TablaScreenState extends State<TablaScreen> {
 }
 
 // ============================================================================
-// ROTACIÓN SCREEN (LISTA DE ROTACIÓN Y CAMISETAS)
+// ROTACIÓN
 // ============================================================================
 
 class RotacionScreen extends StatelessWidget {
@@ -4741,6 +4769,7 @@ class RotacionScreen extends StatelessWidget {
 
         String lasTieneGuardado = dataConfig['lasTiene'] ??
             (listaCamisetasAlfabeticas.isNotEmpty ? listaCamisetasAlfabeticas.first : 'Sin asignar');
+
         int indexActual =
             listaCamisetasAlfabeticas.indexWhere((j) => sonElMismoJugador(j, lasTieneGuardado));
         String nombreVisibleLasTiene = lasTieneGuardado;
