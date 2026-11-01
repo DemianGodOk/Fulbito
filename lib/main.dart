@@ -18,7 +18,7 @@ import 'package:url_launcher/url_launcher.dart';
 // CONFIGURACIÓN GENERAL
 // ============================================================================
 
-String gAppVersion = '1.0.20';
+String gAppVersion = '1.0.21';
 const String kGitHubUser = 'DemianGodOk';
 const String kGitHubRepo = 'Fulbito';
 const String kNombreTorneo = 'Torneo Clausura 2026';
@@ -1233,6 +1233,8 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
     Map<String, dynamic> datosPartido, {
     required List<Jugador> titulares,
   }) async {
+    if (!_esAdmin) return;
+
     if (_verificandoSemana) return;
 
     DateTime? fechaPartido;
@@ -1668,13 +1670,15 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
               plantel: todos,
             );
 
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (!mounted) return;
-              _verificarYActualizarSemanaPartido(
-                infoPartido,
-                titulares: titularesActuales,
-              );
-            });
+            if (_esAdmin) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                _verificarYActualizarSemanaPartido(
+                  infoPartido,
+                  titulares: titularesActuales,
+                );
+              });
+            }
 
             if (_esAdmin && infoPartido['ultimaAlerta'] != null) {
               final alerta = infoPartido['ultimaAlerta'];
@@ -1990,6 +1994,17 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                             SizedBox(width: 8),
                             Text('Cerrar sesión', style: TextStyle(color: Colors.redAccent)),
                           ],
+                        ),
+                      ),
+                      const PopupMenuDivider(),
+                      PopupMenuItem(
+                        enabled: false,
+                        height: 26,
+                        child: Center(
+                          child: Text(
+                            'Versión $gAppVersion',
+                            style: const TextStyle(fontSize: 11, color: Colors.grey),
+                          ),
                         ),
                       ),
                     ],
