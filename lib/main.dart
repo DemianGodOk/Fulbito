@@ -18,10 +18,10 @@ import 'package:url_launcher/url_launcher.dart';
 // CONFIGURACIÓN GENERAL
 // ============================================================================
 
-String gAppVersion = '1.0.19';
+String gAppVersion = '1.0.20';
 const String kGitHubUser = 'DemianGodOk';
 const String kGitHubRepo = 'Fulbito';
-const String kNombreTorneo = 'Torneo Fulbito';
+const String kNombreTorneo = 'Torneo Clausura 2026';
 
 const bool kBypassLogin = false;
 const String kSuperAdminEmail = 'demian.soriano@gmail.com';
@@ -1185,6 +1185,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
   DateTime _ultimoRegistroNotificado = DateTime.now();
   DateTime _ultimoCambioAsistenciaNotificado = DateTime.now();
   DateTime _ultimoVestuarioNotificado = DateTime.now();
+  String _ultimaSemanaVerificadaClave = '';
 
   @override
   void initState() {
@@ -1195,7 +1196,9 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
     _ultimoVestuarioNotificado = DateTime.now();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      verificarActualizacionGitHub(context);
+      if (mounted) {
+        verificarActualizacionGitHub(context);
+      }
     });
   }
 
@@ -1226,7 +1229,10 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
     }
   }
 
-  void _verificarYActualizarSemanaPartido(Map<String, dynamic> datosPartido) async {
+  void _verificarYActualizarSemanaPartido(
+    Map<String, dynamic> datosPartido, {
+    required List<Jugador> titulares,
+  }) async {
     if (_verificandoSemana) return;
 
     DateTime? fechaPartido;
@@ -1240,34 +1246,82 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
 
     if (fechaPartido == null) return;
 
-    final limiteExpiracion =
+    final hoy = DateTime.now();
+    final fechaLimiteActual =
         DateTime(fechaPartido.year, fechaPartido.month, fechaPartido.day + 1);
 
-    if (DateTime.now().isAfter(limiteExpiracion)) {
-      _verificandoSemana = true;
-      try {
-        DateTime nuevaFecha = fechaPartido.add(const Duration(days: 7));
-        while (DateTime(
-          nuevaFecha.year,
-          nuevaFecha.month,
-          nuevaFecha.day + 1,
-        ).isBefore(DateTime.now())) {
-          nuevaFecha = nuevaFecha.add(const Duration(days: 7));
+    final claveActual = '${fechaPartido.millisecondsSinceEpoch}';
+    if (_ultimaSemanaVerificadaClave == claveActual &&
+        !hoy.isAfter(fechaLimiteActual)) {
+      return;
+    }
+
+    if (!hoy.isAfter(fechaLimiteActual)) {
+      _ultimaSemanaVerificadaClave = claveActual;
+      return;
+    }
+
+    _verificandoSemana = true;
+    try {
+      DateTime nuevaFecha = fechaPartido.add(const Duration(days: 7));
+      while (DateTime(
+        nuevaFecha.year,
+        nuevaFecha.month,
+        nuevaFecha.day + 1,
+      ).isBefore(hoy)) {
+        nuevaFecha = nuevaFecha.add(const Duration(days: 7));
+      }
+
+      final nuevoDiaTexto = formatearFechaEspanol(nuevaFecha);
+
+      await FirebaseFirestore.instance.collection('partidos').doc('actual').set({
+        'dia': nuevoDiaTexto,
+        'fechaMillis': nuevaFecha.millisecondsSinceEpoch,
+        'asistencia': FieldValue.delete(),
+        'ultimaAlerta': FieldValue.delete(),
+      }, SetOptions(merge: true));
+
+      final ordenTitulares = titulares
+          .map((j) => j.nombre.trim())
+          .where((nombre) => nombre.isNotEmpty)
+          .toList();
+
+      if (ordenTitulares.isNotEmpty) {
+        final docCamisetas = await FirebaseFirestore.instance
+            .collection('config')
+            .doc('camisetas')
+            .get();
+
+        final listaOrden = List<String>.from(ordenTitulares)
+          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+
+        String actual = (docCamisetas.data()?['lasTiene'] ?? '').toString().trim();
+        if (actual.isEmpty) {
+          actual = listaOrden.first;
         }
 
-        final nuevoDiaTexto = formatearFechaEspanol(nuevaFecha);
+        int indiceActual = listaOrden.indexWhere((nombre) {
+          return sonElMismoJugador(nombre, actual);
+        });
 
-        await FirebaseFirestore.instance.collection('partidos').doc('actual').set({
-          'dia': nuevoDiaTexto,
-          'fechaMillis': nuevaFecha.millisecondsSinceEpoch,
-          'asistencia': FieldValue.delete(),
-          'ultimaAlerta': FieldValue.delete(),
-        }, SetOptions(merge: true));
-      } catch (e) {
-        debugPrint('Error al actualizar fecha semanal del partido: $e');
-      } finally {
-        _verificandoSemana = false;
+        if (indiceActual == -1) {
+          indiceActual = 0;
+        }
+
+        final siguiente = listaOrden[(indiceActual + 1) % listaOrden.length];
+        if (siguiente.isNotEmpty) {
+          await FirebaseFirestore.instance.collection('config').doc('camisetas').set(
+            {'lasTiene': siguiente},
+            SetOptions(merge: true),
+          );
+        }
       }
+
+      _ultimaSemanaVerificadaClave = '${nuevaFecha.millisecondsSinceEpoch}';
+    } catch (e) {
+      debugPrint('Error al actualizar fecha semanal del partido: $e');
+    } finally {
+      _verificandoSemana = false;
     }
   }
 
@@ -1330,20 +1384,27 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
     Map<String, dynamic> datosActuales,
   ) {
     final diaCtrl = TextEditingController(
-        text: datosActuales['dia'] ?? 'Viernes 30 de Octubre');
+      text: datosActuales['dia'] ?? 'Viernes 30 de Octubre',
+    );
     final horaCtrl =
         TextEditingController(text: datosActuales['hora'] ?? '20:00 hs');
     final lugarCtrl = TextEditingController(
-        text: datosActuales['lugar'] ?? 'Estación 98 - Cancha 2');
+      text: datosActuales['lugar'] ?? 'Estación 98 - Cancha 2',
+    );
     final mapsUrlCtrl =
         TextEditingController(text: (datosActuales['mapsUrl'] ?? '').toString());
     final cupoCtrl =
         TextEditingController(text: '${datosActuales['cupoMaximo'] ?? 10}');
+    final nombreTorneoCtrl = TextEditingController(
+      text: (datosActuales['nombreTorneo'] ?? kNombreTorneo).toString(),
+    );
 
     final recDiaCtrl = TextEditingController(
-        text: datosActuales['recordatorioDia'] ?? 'Jueves anterior');
+      text: datosActuales['recordatorioDia'] ?? 'Jueves anterior',
+    );
     final recHoraCtrl = TextEditingController(
-        text: datosActuales['recordatorioHora'] ?? '10:00 hs');
+      text: datosActuales['recordatorioHora'] ?? '10:00 hs',
+    );
 
     DateTime fechaPartidoSeleccionada = datosActuales['fechaMillis'] != null
         ? DateTime.fromMillisecondsSinceEpoch(datosActuales['fechaMillis'] as int)
@@ -1371,6 +1432,18 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                TextField(
+                  controller: nombreTorneoCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Nombre del Torneo',
+                    prefixIcon: Icon(
+                      Icons.emoji_events_outlined,
+                      color: Colors.lightBlueAccent,
+                      size: 20,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 TextField(
                   controller: diaCtrl,
                   readOnly: true,
@@ -1519,6 +1592,9 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                 );
 
                 await FirebaseFirestore.instance.collection('partidos').doc('actual').set({
+                  'nombreTorneo': nombreTorneoCtrl.text.trim().isNotEmpty
+                      ? nombreTorneoCtrl.text.trim()
+                      : kNombreTorneo,
                   'dia': diaCtrl.text.trim(),
                   'fechaMillis': fechaPartidoSeleccionada.millisecondsSinceEpoch,
                   'hora': horaCtrl.text.trim(),
@@ -1545,48 +1621,60 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance.collection('partidos').doc('actual').snapshots(),
       builder: (context, snapshotPartido) {
-        final infoPartido = (snapshotPartido.data?.data() as Map<String, dynamic>?) ??
-            {
-              'dia': 'Viernes 30 de Octubre',
-              'hora': '20:00 hs',
-              'lugar': 'Estación 98 - Cancha 2',
-              'mapsUrl': '',
-              'cupoMaximo': 10,
-            };
+        if (snapshotPartido.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
 
-        _revisarProgramacionRecordatorio(infoPartido);
-        _verificarYActualizarSemanaPartido(infoPartido);
+        if (!snapshotPartido.hasData ||
+            snapshotPartido.data == null ||
+            !snapshotPartido.data!.exists) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        final infoPartido = (snapshotPartido.data!.data() as Map<String, dynamic>?) ?? {};
 
         return StreamBuilder<DocumentSnapshot>(
           stream: FirebaseFirestore.instance.collection('config').doc('plantel').snapshots(),
           builder: (context, snapshotPlantel) {
-            List<Jugador> titulares = [];
-            List<Jugador> suplentes = [];
+            List<Jugador> titularesActuales = [];
+            List<Jugador> suplentesActuales = [];
 
             if (snapshotPlantel.hasData && snapshotPlantel.data!.exists) {
               final data = snapshotPlantel.data!.data() as Map<String, dynamic>?;
 
               if (data != null) {
                 if (data['titulares'] != null) {
-                  titulares = (data['titulares'] as List)
+                  titularesActuales = (data['titulares'] as List)
                       .map((e) => Jugador.fromMap(Map<String, dynamic>.from(e)))
                       .toList();
                 }
                 if (data['suplentes'] != null) {
-                  suplentes = (data['suplentes'] as List)
+                  suplentesActuales = (data['suplentes'] as List)
                       .map((e) => Jugador.fromMap(Map<String, dynamic>.from(e)))
                       .toList();
                 }
               }
             }
 
-            final todos = [...titulares, ...suplentes];
+            final todos = [...titularesActuales, ...suplentesActuales];
             final aliasUsuario = resolverAliasOPrimerNombre(
               nombreGoogle: widget.nombreJugador,
               emailGoogle: widget.emailJugador,
               uidGoogle: FirebaseAuth.instance.currentUser?.uid,
               plantel: todos,
             );
+
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              _verificarYActualizarSemanaPartido(
+                infoPartido,
+                titulares: titularesActuales,
+              );
+            });
 
             if (_esAdmin && infoPartido['ultimaAlerta'] != null) {
               final alerta = infoPartido['ultimaAlerta'];
@@ -1715,6 +1803,8 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
               }
             }
 
+            _revisarProgramacionRecordatorio(infoPartido);
+
             final bool esModerador = _esAdmin ||
                 todos.any(
                   (j) =>
@@ -1730,19 +1820,20 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                 emailJugador: widget.emailJugador,
                 infoPartido: infoPartido,
                 esAdmin: _esAdmin,
-                titulares: titulares,
-                suplentes: suplentes,
+                titulares: titularesActuales,
+                suplentes: suplentesActuales,
               ),
               TablaScreen(
                 esAdmin: _esAdmin,
                 puedeCargarResultado: _esAdmin || esModerador,
                 nombreJugador: aliasUsuario,
-                titulares: titulares,
+                titulares: titularesActuales,
               ),
               RotacionScreen(
                 esAdmin: _esAdmin,
-                titulares: titulares,
-                suplentes: suplentes,
+                titulares: titularesActuales,
+                suplentes: suplentesActuales,
+                infoPartidoDia: (infoPartido['dia'] ?? '').toString(),
                 onAbrirGestionPlantel: () => _abrirGestionPlantel(context),
               ),
               VestuarioScreen(aliasUsuario: aliasUsuario),
@@ -1899,17 +1990,6 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                             SizedBox(width: 8),
                             Text('Cerrar sesión', style: TextStyle(color: Colors.redAccent)),
                           ],
-                        ),
-                      ),
-                      const PopupMenuDivider(),
-                      PopupMenuItem(
-                        enabled: false,
-                        height: 26,
-                        child: Center(
-                          child: Text(
-                            'Versión $gAppVersion',
-                            style: const TextStyle(fontSize: 11, color: Colors.grey),
-                          ),
                         ),
                       ),
                     ],
@@ -2860,6 +2940,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final nombreTorneo = (widget.infoPartido['nombreTorneo'] ?? kNombreTorneo).toString();
     final dia = widget.infoPartido['dia'] ?? 'Viernes 30 de Octubre';
     final hora = widget.infoPartido['hora'] ?? '20:00 hs';
     final lugar = widget.infoPartido['lugar'] ?? 'Estación 98 - Cancha 2';
@@ -2938,45 +3019,83 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    kNombreTorneo,
-                    style: TextStyle(
+                  Text(
+                    nombreTorneo,
+                    style: const TextStyle(
                       color: Colors.lightBlueAccent,
                       fontWeight: FontWeight.bold,
                       fontSize: 12,
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.lightBlueAccent.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          dia,
-                          style: const TextStyle(
-                            color: Colors.lightBlueAccent,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.03),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: Colors.lightBlueAccent.withValues(alpha: 0.18),
+                      ),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Fecha',
+                                style: TextStyle(
+                                  color: Colors.tealAccent.withValues(alpha: 0.8),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                dia,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 18,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ),
-                      Text(
-                        'Fútbol ${(cupoMaximo / 2).round()}',
-                        style: const TextStyle(color: Colors.grey, fontSize: 13),
-                      ),
-                    ],
+                        Container(
+                          width: 1,
+                          height: 52,
+                          color: Colors.white.withValues(alpha: 0.12),
+                          margin: const EdgeInsets.symmetric(horizontal: 12),
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Horario',
+                              style: TextStyle(
+                                color: Colors.tealAccent.withValues(alpha: 0.8),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              hora,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 22,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    hora,
-                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 14),
                   Row(
                     children: [
                       const Icon(Icons.location_on, size: 16, color: Colors.red),
@@ -3526,6 +3645,7 @@ class _TablaScreenState extends State<TablaScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: const Color(0xFF142030),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -3544,219 +3664,222 @@ class _TablaScreenState extends State<TablaScreen> {
               right: 20,
               bottom: MediaQuery.of(context).viewInsets.bottom + 20,
             ),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Row(
-                        children: [
-                          Icon(Icons.sports_score, color: Colors.lightBlueAccent),
-                          SizedBox(width: 8),
-                          Text(
-                            'Cargar Resultado',
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                          ),
-                        ],
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        icon: const Icon(Icons.close),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: fechaCtrl,
-                    readOnly: true,
-                    onTap: () async {
-                      final picked = await showDatePicker(
-                        context: context,
-                        initialDate: DateTime.now(),
-                        firstDate: DateTime(2024),
-                        lastDate: DateTime(2035),
-                      );
-                      if (picked != null) {
-                        setModalState(() => fechaCtrl.text = formatearFechaEspanol(picked));
-                      }
-                    },
-                    decoration: const InputDecoration(
-                      labelText: 'Fecha del Partido',
-                      prefixIcon: Icon(Icons.calendar_month, color: Colors.lightBlueAccent, size: 20),
-                      suffixIcon: Icon(Icons.arrow_drop_down),
-                      isDense: true,
+            child: SafeArea(
+              top: false,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.sports_score, color: Colors.lightBlueAccent),
+                            SizedBox(width: 8),
+                            Text(
+                              'Cargar Resultado',
+                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          icon: const Icon(Icons.close),
+                        ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          children: [
-                            TextField(
-                              controller: nombreEquipoACtrl,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                              decoration: const InputDecoration(
-                                isDense: true,
-                                border: InputBorder.none,
-                              ),
-                            ),
-                            TextField(
-                              controller: golesACtrl,
-                              textAlign: TextAlign.center,
-                              keyboardType: TextInputType.number,
-                              style: const TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.lightBlueAccent,
-                              ),
-                              decoration: const InputDecoration(
-                                hintText: '0',
-                                border: OutlineInputBorder(),
-                                isDense: true,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${equipoA.length} jugadores',
-                              style: const TextStyle(fontSize: 11, color: Colors.grey),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 12.0),
-                        child: Text(
-                          'VS',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.grey,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: Column(
-                          children: [
-                            TextField(
-                              controller: nombreEquipoBCtrl,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                              decoration: const InputDecoration(
-                                isDense: true,
-                                border: InputBorder.none,
-                              ),
-                            ),
-                            TextField(
-                              controller: golesBCtrl,
-                              textAlign: TextAlign.center,
-                              keyboardType: TextInputType.number,
-                              style: const TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.orangeAccent,
-                              ),
-                              decoration: const InputDecoration(
-                                hintText: '0',
-                                border: OutlineInputBorder(),
-                                isDense: true,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${equipoB.length} jugadores',
-                              style: const TextStyle(fontSize: 11, color: Colors.grey),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'Asignar Equipos (Blanco ➔ Negro ➔ Quitar)',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
-                  ),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: jugadoresDisponibles.map((jugador) {
-                      final estado = asignaciones[jugador] ?? 0;
-                      Color bg = Colors.white10;
-                      Color text = Colors.white70;
-                      IconData icon = Icons.add;
-
-                      if (estado == 1) {
-                        bg = Colors.lightBlueAccent.withValues(alpha: 0.25);
-                        text = Colors.lightBlueAccent;
-                        icon = Icons.check_circle;
-                      } else if (estado == 2) {
-                        bg = Colors.orangeAccent.withValues(alpha: 0.25);
-                        text = Colors.orangeAccent;
-                        icon = Icons.check_circle_outline;
-                      }
-
-                      return ActionChip(
-                        avatar: Icon(icon, size: 14, color: text),
-                        label: Text(jugador, style: TextStyle(color: text, fontSize: 12)),
-                        backgroundColor: bg,
-                        side: BorderSide(color: text.withValues(alpha: 0.4)),
-                        onPressed: () {
-                          setModalState(() => asignaciones[jugador] = (estado + 1) % 3);
-                        },
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 24),
-                  FilledButton.icon(
-                    icon: const Icon(Icons.save),
-                    label: const Text('Guardar Partido y Actualizar Rotación'),
-                    onPressed: () async {
-                      final int golesA = int.tryParse(golesACtrl.text.trim()) ?? 0;
-                      final int golesB = int.tryParse(golesBCtrl.text.trim()) ?? 0;
-
-                      if (equipoA.isEmpty || equipoB.isEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Debes asignar jugadores a ambos equipos.'),
-                          ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: fechaCtrl,
+                      readOnly: true,
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: DateTime.now(),
+                          firstDate: DateTime(2024),
+                          lastDate: DateTime(2035),
                         );
-                        return;
-                      }
+                        if (picked != null) {
+                          setModalState(() => fechaCtrl.text = formatearFechaEspanol(picked));
+                        }
+                      },
+                      decoration: const InputDecoration(
+                        labelText: 'Fecha del Partido',
+                        prefixIcon: Icon(Icons.calendar_month, color: Colors.lightBlueAccent, size: 20),
+                        suffixIcon: Icon(Icons.arrow_drop_down),
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            children: [
+                              TextField(
+                                controller: nombreEquipoACtrl,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                  border: InputBorder.none,
+                                ),
+                              ),
+                              TextField(
+                                controller: golesACtrl,
+                                textAlign: TextAlign.center,
+                                keyboardType: TextInputType.number,
+                                style: const TextStyle(
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.lightBlueAccent,
+                                ),
+                                decoration: const InputDecoration(
+                                  hintText: '0',
+                                  border: OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${equipoA.length} jugadores',
+                                style: const TextStyle(fontSize: 11, color: Colors.grey),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 12.0),
+                          child: Text(
+                            'VS',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey,
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Column(
+                            children: [
+                              TextField(
+                                controller: nombreEquipoBCtrl,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                  border: InputBorder.none,
+                                ),
+                              ),
+                              TextField(
+                                controller: golesBCtrl,
+                                textAlign: TextAlign.center,
+                                keyboardType: TextInputType.number,
+                                style: const TextStyle(
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.orangeAccent,
+                                ),
+                                decoration: const InputDecoration(
+                                  hintText: '0',
+                                  border: OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${equipoB.length} jugadores',
+                                style: const TextStyle(fontSize: 11, color: Colors.grey),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    const Text(
+                      'Asignar Equipos (Blanco ➔ Negro ➔ Quitar)',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: jugadoresDisponibles.map((jugador) {
+                        final estado = asignaciones[jugador] ?? 0;
+                        Color bg = Colors.white10;
+                        Color text = Colors.white70;
+                        IconData icon = Icons.add;
 
-                      await FirebaseFirestore.instance.collection('historial_partidos').add({
-                        'fecha': fechaCtrl.text.trim(),
-                        'equipoA_nombre': nombreEquipoACtrl.text.trim(),
-                        'equipoB_nombre': nombreEquipoBCtrl.text.trim(),
-                        'equipoA_goles': golesA,
-                        'equipoB_goles': golesB,
-                        'equipoA_jugadores': equipoA,
-                        'equipoB_jugadores': equipoB,
-                        'creadoEn': FieldValue.serverTimestamp(),
-                      });
+                        if (estado == 1) {
+                          bg = Colors.lightBlueAccent.withValues(alpha: 0.25);
+                          text = Colors.lightBlueAccent;
+                          icon = Icons.check_circle;
+                        } else if (estado == 2) {
+                          bg = Colors.orangeAccent.withValues(alpha: 0.25);
+                          text = Colors.orangeAccent;
+                          icon = Icons.check_circle_outline;
+                        }
 
-                      final jugaronSet = {...equipoA, ...equipoB};
-                      final noJugaron = widget.titulares
-                          .where((j) => !jugaronSet.any((p) => sonElMismoJugador(p, j.nombre)))
-                          .toList();
-                      final siJugaron = widget.titulares
-                          .where((j) => jugaronSet.any((p) => sonElMismoJugador(p, j.nombre)))
-                          .toList();
-                      final nuevoOrdenTitulares = [...noJugaron, ...siJugaron];
+                        return ActionChip(
+                          avatar: Icon(icon, size: 14, color: text),
+                          label: Text(jugador, style: TextStyle(color: text, fontSize: 12)),
+                          backgroundColor: bg,
+                          side: BorderSide(color: text.withValues(alpha: 0.4)),
+                          onPressed: () {
+                            setModalState(() => asignaciones[jugador] = (estado + 1) % 3);
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 24),
+                    FilledButton.icon(
+                      icon: const Icon(Icons.save),
+                      label: const Text('Guardar Partido y Actualizar Rotación'),
+                      onPressed: () async {
+                        final int golesA = int.tryParse(golesACtrl.text.trim()) ?? 0;
+                        final int golesB = int.tryParse(golesBCtrl.text.trim()) ?? 0;
 
-                      await FirebaseFirestore.instance.collection('config').doc('plantel').set({
-                        'titulares': nuevoOrdenTitulares.map((j) => j.toMap()).toList(),
-                      }, SetOptions(merge: true));
+                        if (equipoA.isEmpty || equipoB.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Debes asignar jugadores a ambos equipos.'),
+                            ),
+                          );
+                          return;
+                        }
 
-                      if (ctx.mounted) Navigator.pop(ctx);
-                    },
-                  ),
-                ],
+                        await FirebaseFirestore.instance.collection('historial_partidos').add({
+                          'fecha': fechaCtrl.text.trim(),
+                          'equipoA_nombre': nombreEquipoACtrl.text.trim(),
+                          'equipoB_nombre': nombreEquipoBCtrl.text.trim(),
+                          'equipoA_goles': golesA,
+                          'equipoB_goles': golesB,
+                          'equipoA_jugadores': equipoA,
+                          'equipoB_jugadores': equipoB,
+                          'creadoEn': FieldValue.serverTimestamp(),
+                        });
+
+                        final jugaronSet = {...equipoA, ...equipoB};
+                        final noJugaron = widget.titulares
+                            .where((j) => !jugaronSet.any((p) => sonElMismoJugador(p, j.nombre)))
+                            .toList();
+                        final siJugaron = widget.titulares
+                            .where((j) => jugaronSet.any((p) => sonElMismoJugador(p, j.nombre)))
+                            .toList();
+                        final nuevoOrdenTitulares = [...noJugaron, ...siJugaron];
+
+                        await FirebaseFirestore.instance.collection('config').doc('plantel').set({
+                          'titulares': nuevoOrdenTitulares.map((j) => j.toMap()).toList(),
+                        }, SetOptions(merge: true));
+
+                        if (ctx.mounted) Navigator.pop(ctx);
+                      },
+                    ),
+                  ],
+                ),
               ),
             ),
           );
@@ -4616,6 +4739,7 @@ class RotacionScreen extends StatelessWidget {
   final bool esAdmin;
   final List<Jugador> titulares;
   final List<Jugador> suplentes;
+  final String infoPartidoDia;
   final VoidCallback onAbrirGestionPlantel;
 
   const RotacionScreen({
@@ -4623,6 +4747,7 @@ class RotacionScreen extends StatelessWidget {
     required this.esAdmin,
     required this.titulares,
     required this.suplentes,
+    required this.infoPartidoDia,
     required this.onAbrirGestionPlantel,
   });
 
@@ -4673,6 +4798,7 @@ class RotacionScreen extends StatelessWidget {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: const Color(0xFF142030),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -4794,6 +4920,30 @@ class RotacionScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                color: Colors.lightBlueAccent.withValues(alpha: 0.12),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.calendar_month, color: Colors.lightBlueAccent, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Rotación correspondiente al ${infoPartidoDia.isNotEmpty ? infoPartidoDia : 'fecha no disponible'}',
+                          style: const TextStyle(
+                            color: Colors.lightBlueAccent,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Card(
                 elevation: 3,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 color: const Color(0xFF16253B),
@@ -4901,24 +5051,6 @@ class RotacionScreen extends StatelessWidget {
                           ],
                         ),
                       ),
-                      if (esAdmin) ...[
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.lightBlueAccent,
-                              side: const BorderSide(color: Colors.lightBlueAccent),
-                            ),
-                            icon: const Icon(Icons.done_all, size: 16),
-                            label: Text('Confirmar entrega a $leTocaLlevarlas'),
-                            onPressed: () async => await docRefConfig.set(
-                              {'lasTiene': leTocaLlevarlas},
-                              SetOptions(merge: true),
-                            ),
-                          ),
-                        ),
-                      ],
                     ],
                   ),
                 ),
