@@ -18,7 +18,7 @@ import 'package:url_launcher/url_launcher.dart';
 // CONFIGURACIÓN GENERAL
 // ============================================================================
 
-String gAppVersion = '1.0.21';
+String gAppVersion = '1.0.23';
 const String kGitHubUser = 'DemianGodOk';
 const String kGitHubRepo = 'Fulbito';
 const String kNombreTorneo = 'Torneo Clausura 2026';
@@ -46,7 +46,8 @@ Future<void> inicializarNotificaciones() async {
   await flutterLocalNotificationsPlugin.initialize(initializationSettings);
 
   final androidImpl = flutterLocalNotificationsPlugin
-      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+      .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
   await androidImpl?.requestNotificationsPermission();
 }
 
@@ -60,7 +61,8 @@ Future<void> mostrarNotificacion({
   const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
     'fulbito_notif_channel',
     'Avisos de Partidos',
-    channelDescription: 'Notificaciones sobre convocatorias y estado del equipo',
+    channelDescription:
+        'Notificaciones sobre convocatorias y estado del equipo',
     importance: Importance.max,
     priority: Priority.high,
     styleInformation: BigTextStyleInformation(''),
@@ -116,12 +118,16 @@ class Jugador {
   String email;
   String uid;
   bool esModerador;
+  bool baneado;
+  String telefono;
 
   Jugador({
     required this.nombre,
     this.email = '',
     this.uid = '',
     this.esModerador = false,
+    this.baneado = false,
+    this.telefono = '',
   });
 
   Map<String, dynamic> toMap() => {
@@ -129,6 +135,8 @@ class Jugador {
         'email': email,
         'uid': uid,
         'esModerador': esModerador,
+        'baneado': baneado,
+        'telefono': telefono,
       };
 
   factory Jugador.fromMap(Map<String, dynamic> map) => Jugador(
@@ -136,6 +144,8 @@ class Jugador {
         email: (map['email'] ?? '').toString(),
         uid: (map['uid'] ?? '').toString(),
         esModerador: (map['esModerador'] ?? false) as bool,
+        baneado: (map['baneado'] ?? false) as bool,
+        telefono: (map['telefono'] ?? '').toString(),
       );
 }
 
@@ -191,6 +201,7 @@ String nombreLegibleUsuario(Map<String, dynamic> u) {
 
 String _normalizar(String s) {
   var res = limpiarNombre(s).trim().toLowerCase();
+  res = res.replaceAll(RegExp(r'[0-9]+$'), '');
   res = res
       .replaceAll('á', 'a')
       .replaceAll('é', 'e')
@@ -299,7 +310,8 @@ String resolverAliasOPrimerNombre({
     final jEmail = j.email.toLowerCase().trim();
     final jUid = j.uid.trim();
     final matchEmail = jEmail.isNotEmpty && jEmail == emailLimpio;
-    final matchUid = jUid.isNotEmpty && uidLimpio.isNotEmpty && jUid == uidLimpio;
+    final matchUid =
+        jUid.isNotEmpty && uidLimpio.isNotEmpty && jUid == uidLimpio;
     if (matchEmail || matchUid) {
       if (j.nombre.trim().isNotEmpty) return j.nombre.trim();
     }
@@ -354,7 +366,8 @@ Future<void> verificarActualizacionGitHub(BuildContext context) async {
 
   try {
     final response = await http.get(
-      Uri.parse('https://api.github.com/repos/$kGitHubUser/$kGitHubRepo/releases/latest'),
+      Uri.parse(
+          'https://api.github.com/repos/$kGitHubUser/$kGitHubRepo/releases/latest'),
       headers: {
         'Accept': 'application/vnd.github.v3+json',
         'User-Agent': 'FulbitoApp',
@@ -1249,8 +1262,9 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
     if (fechaPartido == null) return;
 
     final hoy = DateTime.now();
+    // Reset automático exactamente a las 0hs del día siguiente del partido
     final fechaLimiteActual =
-        DateTime(fechaPartido.year, fechaPartido.month, fechaPartido.day + 1);
+        DateTime(fechaPartido.year, fechaPartido.month, fechaPartido.day + 1, 0, 0, 0);
 
     final claveActual = '${fechaPartido.millisecondsSinceEpoch}';
     if (_ultimaSemanaVerificadaClave == claveActual &&
@@ -1270,6 +1284,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
         nuevaFecha.year,
         nuevaFecha.month,
         nuevaFecha.day + 1,
+        0, 0, 0,
       ).isBefore(hoy)) {
         nuevaFecha = nuevaFecha.add(const Duration(days: 7));
       }
@@ -1282,42 +1297,6 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
         'asistencia': FieldValue.delete(),
         'ultimaAlerta': FieldValue.delete(),
       }, SetOptions(merge: true));
-
-      final ordenTitulares = titulares
-          .map((j) => j.nombre.trim())
-          .where((nombre) => nombre.isNotEmpty)
-          .toList();
-
-      if (ordenTitulares.isNotEmpty) {
-        final docCamisetas = await FirebaseFirestore.instance
-            .collection('config')
-            .doc('camisetas')
-            .get();
-
-        final listaOrden = List<String>.from(ordenTitulares)
-          ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-
-        String actual = (docCamisetas.data()?['lasTiene'] ?? '').toString().trim();
-        if (actual.isEmpty) {
-          actual = listaOrden.first;
-        }
-
-        int indiceActual = listaOrden.indexWhere((nombre) {
-          return sonElMismoJugador(nombre, actual);
-        });
-
-        if (indiceActual == -1) {
-          indiceActual = 0;
-        }
-
-        final siguiente = listaOrden[(indiceActual + 1) % listaOrden.length];
-        if (siguiente.isNotEmpty) {
-          await FirebaseFirestore.instance.collection('config').doc('camisetas').set(
-            {'lasTiene': siguiente},
-            SetOptions(merge: true),
-          );
-        }
-      }
 
       _ultimaSemanaVerificadaClave = '${nuevaFecha.millisecondsSinceEpoch}';
     } catch (e) {
@@ -1408,6 +1387,21 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
       text: datosActuales['recordatorioHora'] ?? '10:00 hs',
     );
 
+    final fechaInicioTorneoCtrl = TextEditingController(
+      text: (datosActuales['fechaInicioTorneo'] ?? '').toString(),
+    );
+    final fechaFinTorneoCtrl = TextEditingController(
+      text: (datosActuales['fechaFinTorneo'] ?? '').toString(),
+    );
+
+    DateTime? fechaInicioTorneoSeleccionada = datosActuales['fechaInicioTorneoMillis'] != null
+        ? DateTime.fromMillisecondsSinceEpoch(datosActuales['fechaInicioTorneoMillis'] as int)
+        : null;
+
+    DateTime? fechaFinTorneoSeleccionada = datosActuales['fechaFinTorneoMillis'] != null
+        ? DateTime.fromMillisecondsSinceEpoch(datosActuales['fechaFinTorneoMillis'] as int)
+        : null;
+
     DateTime fechaPartidoSeleccionada = datosActuales['fechaMillis'] != null
         ? DateTime.fromMillisecondsSinceEpoch(datosActuales['fechaMillis'] as int)
         : (_parsearFechaEspanol(datosActuales['dia'] ?? '') ?? DateTime.now());
@@ -1427,12 +1421,19 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
             children: [
               Icon(Icons.admin_panel_settings, color: Colors.lightBlueAccent),
               SizedBox(width: 8),
-              Text('Configurar Partido', style: TextStyle(fontSize: 18)),
+              Expanded(
+                child: Text(
+                  'Configurar Partido y Torneo',
+                  style: TextStyle(fontSize: 17),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             ],
           ),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 TextField(
                   controller: nombreTorneoCtrl,
@@ -1444,6 +1445,62 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                       size: 20,
                     ),
                   ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: fechaInicioTorneoCtrl,
+                        readOnly: true,
+                        onTap: () async {
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: fechaInicioTorneoSeleccionada ?? DateTime.now(),
+                            firstDate: DateTime(2024),
+                            lastDate: DateTime(2035),
+                          );
+                          if (picked != null) {
+                            setDlgState(() {
+                              fechaInicioTorneoSeleccionada = picked;
+                              fechaInicioTorneoCtrl.text = formatearFechaEspanol(picked);
+                            });
+                          }
+                        },
+                        decoration: const InputDecoration(
+                          labelText: 'Inicio Torneo',
+                          prefixIcon: Icon(Icons.date_range, color: Colors.tealAccent, size: 18),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: fechaFinTorneoCtrl,
+                        readOnly: true,
+                        onTap: () async {
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: fechaFinTorneoSeleccionada ?? DateTime.now().add(const Duration(days: 60)),
+                            firstDate: DateTime(2024),
+                            lastDate: DateTime(2035),
+                          );
+                          if (picked != null) {
+                            setDlgState(() {
+                              fechaFinTorneoSeleccionada = picked;
+                              fechaFinTorneoCtrl.text = formatearFechaEspanol(picked);
+                            });
+                          }
+                        },
+                        decoration: const InputDecoration(
+                          labelText: 'Fin Torneo',
+                          prefixIcon: Icon(Icons.flag_outlined, color: Colors.amberAccent, size: 18),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -1464,7 +1521,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                     }
                   },
                   decoration: const InputDecoration(
-                    labelText: 'Fecha del Partido',
+                    labelText: 'Fecha del Partido Actual',
                     prefixIcon: Icon(Icons.calendar_month, color: Colors.lightBlueAccent, size: 20),
                     suffixIcon: Icon(Icons.arrow_drop_down),
                   ),
@@ -1597,6 +1654,10 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                   'nombreTorneo': nombreTorneoCtrl.text.trim().isNotEmpty
                       ? nombreTorneoCtrl.text.trim()
                       : kNombreTorneo,
+                  'fechaInicioTorneo': fechaInicioTorneoCtrl.text.trim(),
+                  'fechaInicioTorneoMillis': fechaInicioTorneoSeleccionada?.millisecondsSinceEpoch,
+                  'fechaFinTorneo': fechaFinTorneoCtrl.text.trim(),
+                  'fechaFinTorneoMillis': fechaFinTorneoSeleccionada?.millisecondsSinceEpoch,
                   'dia': diaCtrl.text.trim(),
                   'fechaMillis': fechaPartidoSeleccionada.millisecondsSinceEpoch,
                   'hora': horaCtrl.text.trim(),
@@ -1644,6 +1705,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
           builder: (context, snapshotPlantel) {
             List<Jugador> titularesActuales = [];
             List<Jugador> suplentesActuales = [];
+            List<String> baneadosGlobal = [];
 
             if (snapshotPlantel.hasData && snapshotPlantel.data!.exists) {
               final data = snapshotPlantel.data!.data() as Map<String, dynamic>?;
@@ -1659,6 +1721,11 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                       .map((e) => Jugador.fromMap(Map<String, dynamic>.from(e)))
                       .toList();
                 }
+                if (data['baneados'] != null) {
+                  baneadosGlobal = (data['baneados'] as List)
+                      .map((e) => e.toString().toLowerCase().trim())
+                      .toList();
+                }
               }
             }
 
@@ -1669,6 +1736,12 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
               uidGoogle: FirebaseAuth.instance.currentUser?.uid,
               plantel: todos,
             );
+
+            final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+            final currentEmail = widget.emailJugador.toLowerCase().trim();
+            final bool esBaneado = baneadosGlobal.contains(currentEmail) ||
+                (currentUid.isNotEmpty && baneadosGlobal.contains(currentUid.toLowerCase())) ||
+                todos.any((j) => j.baneado && (sonElMismoJugador(j.nombre, aliasUsuario) || j.email.toLowerCase().trim() == currentEmail));
 
             if (_esAdmin) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1824,6 +1897,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                 emailJugador: widget.emailJugador,
                 infoPartido: infoPartido,
                 esAdmin: _esAdmin,
+                esBaneado: esBaneado,
                 titulares: titularesActuales,
                 suplentes: suplentesActuales,
               ),
@@ -1838,6 +1912,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                 titulares: titularesActuales,
                 suplentes: suplentesActuales,
                 infoPartidoDia: (infoPartido['dia'] ?? '').toString(),
+                asistencia: (infoPartido['asistencia'] as Map<String, dynamic>?) ?? {},
                 onAbrirGestionPlantel: () => _abrirGestionPlantel(context),
               ),
               VestuarioScreen(aliasUsuario: aliasUsuario),
@@ -2061,6 +2136,7 @@ class GestionPlantelScreen extends StatefulWidget {
 class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
   List<Jugador> _titulares = [];
   List<Jugador> _suplentes = [];
+  List<String> _baneados = [];
   List<Map<String, dynamic>> _usuariosRegistrados = [];
   bool _cargando = true;
   bool _guardando = false;
@@ -2086,6 +2162,9 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
               .map((e) => Jugador.fromMap(Map<String, dynamic>.from(e)))
               .toList();
         }
+        if (data['baneados'] != null) {
+          _baneados = (data['baneados'] as List).map((e) => e.toString()).toList();
+        }
       }
 
       final usersSnap = await FirebaseFirestore.instance.collection('usuarios').get();
@@ -2106,6 +2185,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
     await FirebaseFirestore.instance.collection('config').doc('plantel').set({
       'titulares': _titulares.map((j) => j.toMap()).toList(),
       'suplentes': _suplentes.map((j) => j.toMap()).toList(),
+      'baneados': _baneados,
     }, SetOptions(merge: true));
 
     setState(() => _guardando = false);
@@ -2119,8 +2199,45 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
     }
   }
 
+  void _dialogoEditarTelefono(Jugador jugador) {
+    final telCtrl = TextEditingController(text: jugador.telefono);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Teléfono de ${jugador.nombre}'),
+        content: TextField(
+          controller: telCtrl,
+          keyboardType: TextInputType.phone,
+          decoration: const InputDecoration(
+            labelText: 'Número de WhatsApp',
+            hintText: 'Ej: 1123456789',
+            prefixIcon: Icon(Icons.phone, size: 18),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar', style: TextStyle(color: Colors.grey)),
+          ),
+          FilledButton(
+            onPressed: () {
+              setState(() {
+                jugador.telefono = telCtrl.text.trim();
+              });
+              _guardarEnFirestore();
+              Navigator.pop(ctx);
+            },
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _dialogoNuevoJugador() {
     final nombreCtrl = TextEditingController();
+    final telCtrl = TextEditingController();
     bool esTitular = true;
     bool esMod = false;
 
@@ -2138,6 +2255,16 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                 decoration: const InputDecoration(
                   labelText: 'Nombre o Apodo',
                   hintText: 'Ej: Nico',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: telCtrl,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(
+                  labelText: 'Teléfono (Opcional)',
+                  hintText: 'Ej: 1123456789',
+                  prefixIcon: Icon(Icons.phone, size: 18),
                 ),
               ),
               const SizedBox(height: 16),
@@ -2176,7 +2303,11 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                 final nombre = nombreCtrl.text.trim();
                 if (nombre.isNotEmpty) {
                   setState(() {
-                    final item = Jugador(nombre: nombre, esModerador: esMod);
+                    final item = Jugador(
+                      nombre: nombre,
+                      telefono: telCtrl.text.trim(),
+                      esModerador: esMod,
+                    );
                     if (esTitular) {
                       _titulares.add(item);
                     } else {
@@ -2365,6 +2496,21 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
     );
   }
 
+  void _toggleBanJugador(Jugador j) {
+    setState(() {
+      j.baneado = !j.baneado;
+      final emailNorm = j.email.toLowerCase().trim();
+      if (j.baneado) {
+        if (emailNorm.isNotEmpty && !_baneados.contains(emailNorm)) _baneados.add(emailNorm);
+        if (j.uid.isNotEmpty && !_baneados.contains(j.uid)) _baneados.add(j.uid);
+      } else {
+        _baneados.remove(emailNorm);
+        _baneados.remove(j.uid);
+      }
+    });
+    _guardarEnFirestore();
+  }
+
   Widget _buildBotonAccion({
     required IconData icon,
     required Color color,
@@ -2496,14 +2642,16 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
 
                         return Card(
                           margin: const EdgeInsets.symmetric(vertical: 3),
-                          color: const Color(0xFF16253B),
+                          color: j.baneado ? const Color(0xFF3B1616) : const Color(0xFF16253B),
                           child: ListTile(
                             dense: true,
                             contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                            onTap: () => _dialogoEditarTelefono(j),
                             leading: CircleAvatar(
                               radius: 12,
-                              backgroundColor:
-                                  index < 10 ? Colors.green.shade800 : Colors.red.shade900,
+                              backgroundColor: j.baneado
+                                  ? Colors.red.shade900
+                                  : (index < 10 ? Colors.green.shade800 : Colors.orange.shade900),
                               child: Text(
                                 '${index + 1}',
                                 style: const TextStyle(
@@ -2519,10 +2667,32 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                                 Flexible(
                                   child: Text(
                                     j.nombre,
-                                    style: const TextStyle(fontWeight: FontWeight.bold),
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      decoration: j.baneado ? TextDecoration.lineThrough : null,
+                                      color: j.baneado ? Colors.redAccent : Colors.white,
+                                    ),
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
+                                if (j.baneado) ...[
+                                  const SizedBox(width: 4),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red.shade900,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      'BANEADO',
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                                 if (j.esModerador) ...[
                                   const SizedBox(width: 4),
                                   Container(
@@ -2543,18 +2713,40 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                                 ],
                               ],
                             ),
-                            subtitle: Text(
-                              vinculado ? j.email : 'Sin vincular a Google',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: vinculado ? Colors.greenAccent : Colors.grey,
-                              ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  vinculado ? j.email : 'Sin vincular a Google',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: vinculado ? Colors.greenAccent : Colors.grey,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                if (j.telefono.trim().isNotEmpty)
+                                  Text(
+                                    '📞 ${j.telefono}',
+                                    style: const TextStyle(fontSize: 10, color: Colors.tealAccent),
+                                  )
+                                else
+                                  const Text(
+                                    '📞 Sin teléfono (tocá para agregar)',
+                                    style: TextStyle(fontSize: 10, color: Colors.white38),
+                                  ),
+                              ],
                             ),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
+                                _buildBotonAccion(
+                                  icon: j.baneado ? Icons.lock_open : Icons.block,
+                                  color: j.baneado ? Colors.redAccent : Colors.grey.shade600,
+                                  tooltip: j.baneado ? 'Desbanear' : 'Banear jugador',
+                                  onPressed: () => _toggleBanJugador(j),
+                                ),
                                 _buildBotonAccion(
                                   icon: Icons.sports,
                                   color: j.esModerador ? Colors.tealAccent : Colors.grey.shade600,
@@ -2629,14 +2821,15 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
 
                         return Card(
                           margin: const EdgeInsets.symmetric(vertical: 3),
-                          color: Colors.white.withValues(alpha: 0.03),
+                          color: j.baneado ? const Color(0xFF3B1616) : Colors.white.withValues(alpha: 0.03),
                           child: ListTile(
                             dense: true,
                             contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                            leading: const CircleAvatar(
+                            onTap: () => _dialogoEditarTelefono(j),
+                            leading: CircleAvatar(
                               radius: 12,
-                              backgroundColor: Colors.white12,
-                              child: Icon(Icons.person, size: 14, color: Colors.grey),
+                              backgroundColor: j.baneado ? Colors.red.shade900 : Colors.white12,
+                              child: Icon(j.baneado ? Icons.block : Icons.person, size: 14, color: Colors.grey),
                             ),
                             title: Row(
                               mainAxisSize: MainAxisSize.min,
@@ -2644,20 +2837,24 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                                 Flexible(
                                   child: Text(
                                     j.nombre,
-                                    style: const TextStyle(fontWeight: FontWeight.bold),
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      decoration: j.baneado ? TextDecoration.lineThrough : null,
+                                      color: j.baneado ? Colors.redAccent : Colors.white,
+                                    ),
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
-                                if (j.esModerador) ...[
+                                if (j.baneado) ...[
                                   const SizedBox(width: 4),
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                                     decoration: BoxDecoration(
-                                      color: Colors.teal.shade800,
+                                      color: Colors.red.shade900,
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: const Text(
-                                      'MOD',
+                                      'BANEADO',
                                       style: TextStyle(
                                         fontSize: 9,
                                         fontWeight: FontWeight.bold,
@@ -2668,26 +2865,39 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                                 ],
                               ],
                             ),
-                            subtitle: Text(
-                              vinculado ? j.email : 'Sin vincular a Google',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: vinculado ? Colors.greenAccent : Colors.grey,
-                              ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  vinculado ? j.email : 'Sin vincular a Google',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: vinculado ? Colors.greenAccent : Colors.grey,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                if (j.telefono.trim().isNotEmpty)
+                                  Text(
+                                    '📞 ${j.telefono}',
+                                    style: const TextStyle(fontSize: 10, color: Colors.tealAccent),
+                                  )
+                                else
+                                  const Text(
+                                    '📞 Sin teléfono (tocá para agregar)',
+                                    style: TextStyle(fontSize: 10, color: Colors.white38),
+                                  ),
+                              ],
                             ),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 _buildBotonAccion(
-                                  icon: Icons.sports,
-                                  color: j.esModerador ? Colors.tealAccent : Colors.grey.shade600,
-                                  tooltip: j.esModerador ? 'Quitar Moderador' : 'Hacer Moderador',
-                                  onPressed: () {
-                                    setState(() => j.esModerador = !j.esModerador);
-                                    _guardarEnFirestore();
-                                  },
+                                  icon: j.baneado ? Icons.lock_open : Icons.block,
+                                  color: j.baneado ? Colors.redAccent : Colors.grey.shade600,
+                                  tooltip: j.baneado ? 'Desbanear' : 'Banear jugador',
+                                  onPressed: () => _toggleBanJugador(j),
                                 ),
                                 _buildBotonAccion(
                                   icon: vinculado ? Icons.link : Icons.link_off,
@@ -2769,13 +2979,21 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                         final String emailGoogle = (u['email'] ?? '').toString();
                         final String uidGoogle = (u['uid'] ?? '').toString();
                         final String? fotoUrl = u['fotoUrl']?.toString();
+                        final bool estaBaneado = _baneados.contains(emailGoogle.toLowerCase().trim()) ||
+                            _baneados.contains(uidGoogle);
 
                         return Card(
                           margin: const EdgeInsets.symmetric(vertical: 3),
-                          color: Colors.cyanAccent.withValues(alpha: 0.05),
+                          color: estaBaneado
+                              ? const Color(0xFF3B1616)
+                              : Colors.cyanAccent.withValues(alpha: 0.05),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
-                            side: BorderSide(color: Colors.cyanAccent.withValues(alpha: 0.2)),
+                            side: BorderSide(
+                              color: estaBaneado
+                                  ? Colors.redAccent
+                                  : Colors.cyanAccent.withValues(alpha: 0.2),
+                            ),
                           ),
                           child: ListTile(
                             dense: true,
@@ -2798,9 +3016,35 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                                     )
                                   : null,
                             ),
-                            title: Text(
-                              nombreMostrar,
-                              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                            title: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    nombreMostrar,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: estaBaneado ? Colors.redAccent : Colors.white,
+                                      decoration: estaBaneado ? TextDecoration.lineThrough : null,
+                                    ),
+                                  ),
+                                ),
+                                if (estaBaneado)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red.shade900,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      'BANEADO',
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
                             subtitle: Text(
                               emailGoogle,
@@ -2810,12 +3054,24 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                               icon: const Icon(Icons.more_vert, size: 18, color: Colors.cyanAccent),
                               tooltip: 'Opciones de cuenta',
                               onSelected: (val) {
-                                if (val == 'titular') {
+                                if (val == 'banear') {
+                                  setState(() {
+                                    if (estaBaneado) {
+                                      _baneados.remove(emailGoogle.toLowerCase().trim());
+                                      _baneados.remove(uidGoogle);
+                                    } else {
+                                      if (emailGoogle.isNotEmpty) _baneados.add(emailGoogle.toLowerCase().trim());
+                                      if (uidGoogle.isNotEmpty) _baneados.add(uidGoogle);
+                                    }
+                                  });
+                                  _guardarEnFirestore();
+                                } else if (val == 'titular') {
                                   setState(() {
                                     _titulares.add(Jugador(
                                       nombre: nombreMostrar,
                                       email: emailGoogle,
                                       uid: uidGoogle,
+                                      baneado: estaBaneado,
                                     ));
                                   });
                                   _guardarEnFirestore();
@@ -2825,6 +3081,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                                       nombre: nombreMostrar,
                                       email: emailGoogle,
                                       uid: uidGoogle,
+                                      baneado: estaBaneado,
                                     ));
                                   });
                                   _guardarEnFirestore();
@@ -2832,8 +3089,8 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                                   _dialogoVincularAUnoExistente(nombreMostrar, emailGoogle, uidGoogle);
                                 }
                               },
-                              itemBuilder: (ctx) => const [
-                                PopupMenuItem(
+                              itemBuilder: (ctx) => [
+                                const PopupMenuItem(
                                   value: 'vincular',
                                   child: Row(
                                     children: [
@@ -2843,7 +3100,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                                     ],
                                   ),
                                 ),
-                                PopupMenuItem(
+                                const PopupMenuItem(
                                   value: 'titular',
                                   child: Row(
                                     children: [
@@ -2853,13 +3110,24 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                                     ],
                                   ),
                                 ),
-                                PopupMenuItem(
+                                const PopupMenuItem(
                                   value: 'suplente',
                                   child: Row(
                                     children: [
                                       Icon(Icons.person_add_outlined, size: 18, color: Colors.orangeAccent),
                                       SizedBox(width: 8),
                                       Text('Agregar como Suplente'),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: 'banear',
+                                  child: Row(
+                                    children: [
+                                      Icon(estaBaneado ? Icons.lock_open : Icons.block,
+                                          size: 18, color: estaBaneado ? Colors.greenAccent : Colors.redAccent),
+                                      const SizedBox(width: 8),
+                                      Text(estaBaneado ? 'Desbanear usuario' : 'Banear jugador'),
                                     ],
                                   ),
                                 ),
@@ -2886,6 +3154,7 @@ class ConvocatoriaScreen extends StatefulWidget {
   final String emailJugador;
   final Map<String, dynamic> infoPartido;
   final bool esAdmin;
+  final bool esBaneado;
   final List<Jugador> titulares;
   final List<Jugador> suplentes;
 
@@ -2895,6 +3164,7 @@ class ConvocatoriaScreen extends StatefulWidget {
     required this.emailJugador,
     required this.infoPartido,
     required this.esAdmin,
+    required this.esBaneado,
     required this.titulares,
     required this.suplentes,
   });
@@ -2907,20 +3177,54 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   Future<void> _cambiarEstadoJugador(Jugador j, String nuevoEstado) async {
-    await _db.collection('partidos').doc('actual').set({
-      'asistencia': {j.nombre: nuevoEstado},
-      'alertaCambioAsistencia': {
-        'tipo': nuevoEstado,
-        'nombre': j.nombre,
-        'timestamp': FieldValue.serverTimestamp(),
-      },
-      if (nuevoEstado == 'baja')
-        'ultimaAlerta': {
-          'tipo': 'baja',
+    try {
+      await _db.collection('partidos').doc('actual').update({
+        'asistencia.${j.nombre}': nuevoEstado,
+        'alertaCambioAsistencia': {
+          'tipo': nuevoEstado,
           'nombre': j.nombre,
           'timestamp': FieldValue.serverTimestamp(),
         },
-    }, SetOptions(merge: true));
+        if (nuevoEstado == 'baja')
+          'ultimaAlerta': {
+            'tipo': 'baja',
+            'nombre': j.nombre,
+            'timestamp': FieldValue.serverTimestamp(),
+          },
+      });
+    } catch (e) {
+      await _db.collection('partidos').doc('actual').set({
+        'asistencia': {j.nombre: nuevoEstado},
+      }, SetOptions(merge: true));
+    }
+  }
+
+  Future<void> _enviarWhatsApp(String telefono, String nombre) async {
+    final celLimpio = telefono.replaceAll(RegExp(r'[^0-9]'), '');
+    if (celLimpio.isEmpty) return;
+
+    String celFinal = celLimpio;
+    if (!celFinal.startsWith('54')) {
+      if (celFinal.startsWith('9')) {
+        celFinal = '54$celFinal';
+      } else {
+        celFinal = '549$celFinal';
+      }
+    }
+
+    const mensaje = 'Recordatorio: No te olvides de confirmar asistencia del fulbito!';
+    final url = Uri.parse('https://wa.me/$celFinal?text=${Uri.encodeComponent(mensaje)}');
+
+    if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo abrir WhatsApp.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    }
   }
 
   Widget _buildBotonAdmin(Jugador j, String estadoActual) {
@@ -2930,16 +3234,35 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
       children: [
         if (estadoActual != 'confirmado')
           IconButton(
-            icon: const Icon(Icons.check_circle, size: 20, color: Colors.greenAccent),
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            icon: const Icon(Icons.check_circle, size: 19, color: Colors.greenAccent),
             tooltip: 'Confirmar a ${j.nombre}',
             onPressed: () => _cambiarEstadoJugador(j, 'confirmado'),
           ),
-        if (estadoActual != 'baja')
+        if (estadoActual != 'baja') ...[
+          const SizedBox(width: 8),
           IconButton(
-            icon: const Icon(Icons.cancel, size: 20, color: Colors.redAccent),
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            icon: const Icon(Icons.cancel, size: 19, color: Colors.redAccent),
             tooltip: 'Dar de baja a ${j.nombre}',
             onPressed: () => _cambiarEstadoJugador(j, 'baja'),
           ),
+        ],
+        if (estadoActual == 'pendiente' && j.telefono.trim().isNotEmpty) ...[
+          const SizedBox(width: 8),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            icon: const Icon(Icons.chat_outlined, size: 19, color: Colors.green),
+            tooltip: 'Avisar por WhatsApp',
+            onPressed: () => _enviarWhatsApp(j.telefono, j.nombre),
+          ),
+        ],
       ],
     );
   }
@@ -2963,6 +3286,8 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
     final cupoMaximo = widget.infoPartido['cupoMaximo'] ?? 10;
     final Map<String, dynamic> asistencia =
         (widget.infoPartido['asistencia'] as Map<String, dynamic>?) ?? {};
+
+    final int? finTorneoMillis = widget.infoPartido['fechaFinTorneoMillis'] as int?;
 
     final List<Jugador> prioritarios = widget.titulares.take(cupoMaximo).toList();
     final List<Jugador> colaEspera = [
@@ -3022,585 +3347,668 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
     final jugadorActualObj =
         Jugador(nombre: widget.nombreJugador, email: widget.emailJugador);
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    nombreTorneo,
-                    style: const TextStyle(
-                      color: Colors.lightBlueAccent,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.03),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: Colors.lightBlueAccent.withValues(alpha: 0.18),
-                      ),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Fecha',
-                                style: TextStyle(
-                                  color: Colors.tealAccent.withValues(alpha: 0.8),
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                dia,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 18,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          width: 1,
-                          height: 52,
-                          color: Colors.white.withValues(alpha: 0.12),
-                          margin: const EdgeInsets.symmetric(horizontal: 12),
-                        ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Horario',
-                              style: TextStyle(
-                                color: Colors.tealAccent.withValues(alpha: 0.8),
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance.collection('historial_partidos').snapshots(),
+      builder: (context, snapHistorial) {
+        final docsHistorial = snapHistorial.data?.docs ?? [];
+        final int nroFechaCalculada = docsHistorial.length + 1;
+        final String tituloFecha = 'Fecha $nroFechaCalculada';
+
+        String campeon = '';
+        bool torneoTerminado = false;
+
+        if (finTorneoMillis != null && docsHistorial.isNotEmpty) {
+          final hoyMillis = DateTime.now().millisecondsSinceEpoch;
+          final bool hayPartidoFinalCargado = docsHistorial.any((d) {
+            final data = d.data() as Map<String, dynamic>;
+            final ts = (data['creadoEn'] as Timestamp?)?.millisecondsSinceEpoch ?? 0;
+            return ts >= finTorneoMillis;
+          });
+
+          if (hayPartidoFinalCargado || hoyMillis >= finTorneoMillis) {
+            torneoTerminado = true;
+
+            final Map<String, int> ptsMap = {};
+            final Map<String, int> pjMap = {};
+            for (final d in docsHistorial) {
+              final data = d.data() as Map<String, dynamic>;
+              final int gA = data['equipoA_goles'] ?? 0;
+              final int gB = data['equipoB_goles'] ?? 0;
+              final List eqA = data['equipoA_jugadores'] ?? [];
+              final List eqB = data['equipoB_jugadores'] ?? [];
+
+              for (var j in eqA) {
+                final nom = limpiarNombre(j.toString());
+                if (nom.isEmpty) continue;
+                pjMap[nom] = (pjMap[nom] ?? 0) + 1;
+                ptsMap[nom] = (ptsMap[nom] ?? 0) + (gA > gB ? 3 : (gA == gB ? 1 : 0));
+              }
+              for (var j in eqB) {
+                final nom = limpiarNombre(j.toString());
+                if (nom.isEmpty) continue;
+                pjMap[nom] = (pjMap[nom] ?? 0) + 1;
+                ptsMap[nom] = (ptsMap[nom] ?? 0) + (gB > gA ? 3 : (gA == gB ? 1 : 0));
+              }
+            }
+
+            final ranking = ptsMap.entries.toList()
+              ..sort((a, b) {
+                int cmp = b.value.compareTo(a.value);
+                if (cmp != 0) return cmp;
+                double promA = a.value / (pjMap[a.key] ?? 1);
+                double promB = b.value / (pjMap[b.key] ?? 1);
+                return promB.compareTo(promA);
+              });
+
+            if (ranking.isNotEmpty) {
+              campeon = ranking.first.key;
+            }
+          }
+        }
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Card(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              nombreTorneo,
+                              style: const TextStyle(
+                                color: Colors.lightBlueAccent,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
                               ),
                             ),
-                            const SizedBox(height: 4),
+                          ),
+                          if (torneoTerminado && campeon.isNotEmpty)
                             Text(
-                              hora,
+                              '🏆 ${campeon.toUpperCase()} CAMPEÓN',
                               style: const TextStyle(
-                                color: Colors.white,
+                                color: Colors.amberAccent,
                                 fontWeight: FontWeight.bold,
-                                fontSize: 22,
+                                fontSize: 16,
+                                letterSpacing: 0.5,
                               ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.03),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: Colors.lightBlueAccent.withValues(alpha: 0.18),
+                          ),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    tituloFecha,
+                                    style: TextStyle(
+                                      color: Colors.tealAccent.withValues(alpha: 0.9),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    dia,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 18,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              width: 1,
+                              height: 52,
+                              color: Colors.white.withValues(alpha: 0.12),
+                              margin: const EdgeInsets.symmetric(horizontal: 12),
+                            ),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Horario',
+                                  style: TextStyle(
+                                    color: Colors.tealAccent.withValues(alpha: 0.8),
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  hora,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 22,
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      const Icon(Icons.location_on, size: 16, color: Colors.red),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: InkWell(
-                          onTap: () async {
-                            if (mapsUrl.isEmpty) return;
-                            final uri = Uri.tryParse(mapsUrl);
-                            if (uri == null) return;
-                            if (!await launchUrl(
-                              uri,
-                              mode: LaunchMode.externalApplication,
-                            )) {
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('No se pudo abrir Google Maps.'),
-                                    backgroundColor: Colors.orange,
-                                  ),
-                                );
-                              }
-                            }
-                          },
-                          child: Text(
-                            lugar,
-                            style: const TextStyle(color: Colors.grey),
-                            overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          const Icon(Icons.location_on, size: 16, color: Colors.red),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: InkWell(
+                              onTap: () async {
+                                if (mapsUrl.isEmpty) return;
+                                final uri = Uri.tryParse(mapsUrl);
+                                if (uri == null) return;
+                                if (!await launchUrl(
+                                  uri,
+                                  mode: LaunchMode.externalApplication,
+                                )) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('No se pudo abrir Google Maps.'),
+                                        backgroundColor: Colors.orange,
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
+                              child: Text(
+                                lugar,
+                                style: const TextStyle(color: Colors.grey),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
                           ),
-                        ),
+                        ],
                       ),
-                    ],
-                  ),
-                  const Divider(height: 24),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Cupos confirmados asegurados:',
-                        style: TextStyle(fontSize: 13),
+                      const Divider(height: 24),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Cupos confirmados asegurados:',
+                            style: TextStyle(fontSize: 13),
+                          ),
+                          Text(
+                            '$totalTitulares / $cupoMaximo',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: totalTitulares >= cupoMaximo
+                                  ? Colors.lightBlueAccent
+                                  : Colors.orangeAccent,
+                            ),
+                          ),
+                        ],
                       ),
-                      Text(
-                        '$totalTitulares / $cupoMaximo',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: totalTitulares >= cupoMaximo
+                      const SizedBox(height: 8),
+                      LinearProgressIndicator(
+                        value: (totalTitulares / cupoMaximo).clamp(0.0, 1.0),
+                        backgroundColor: Colors.white10,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          totalTitulares >= cupoMaximo
                               ? Colors.lightBlueAccent
                               : Colors.orangeAccent,
                         ),
+                        borderRadius: BorderRadius.circular(10),
+                        minHeight: 6,
                       ),
+                      if (prioritariosPendientes.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Hay ${prioritariosPendientes.length} titular(es) con cupo reservado que todavía no respondieron.',
+                          style: const TextStyle(fontSize: 11, color: Colors.amberAccent),
+                        ),
+                      ],
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  LinearProgressIndicator(
-                    value: (totalTitulares / cupoMaximo).clamp(0.0, 1.0),
-                    backgroundColor: Colors.white10,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      totalTitulares >= cupoMaximo
-                          ? Colors.lightBlueAccent
-                          : Colors.orangeAccent,
-                    ),
-                    borderRadius: BorderRadius.circular(10),
-                    minHeight: 6,
-                  ),
-                  if (prioritariosPendientes.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Hay ${prioritariosPendientes.length} titular(es) con cupo reservado que todavía no respondieron.',
-                      style: const TextStyle(fontSize: 11, color: Colors.amberAccent),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Card(
-            color: Colors.white.withValues(alpha: 0.05),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            child: Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '¿Jugás esta semana?',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: () => _cambiarEstadoJugador(jugadorActualObj, 'confirmado'),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: miEstado == 'confirmado'
-                                ? const Color(0xFF1B5E20)
-                                : Colors.grey.shade800,
-                            foregroundColor: Colors.white,
-                          ),
-                          icon: const Icon(Icons.check, size: 18),
-                          label: const Text('Confirmo'),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () => _cambiarEstadoJugador(jugadorActualObj, 'baja'),
-                          style: OutlinedButton.styleFrom(
-                            side: BorderSide(
-                              color: miEstado == 'baja' ? Colors.redAccent : Colors.grey.shade700,
-                            ),
-                          ),
-                          icon: Icon(
-                            Icons.close,
-                            size: 18,
-                            color: miEstado == 'baja' ? Colors.redAccent : Colors.grey,
-                          ),
-                          label: Text(
-                            'Me bajo',
-                            style: TextStyle(
-                              color: miEstado == 'baja' ? Colors.redAccent : Colors.grey,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Titulares Confirmados ($totalTitulares / $cupoMaximo)',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.greenAccent,
-                  ),
-                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              const SizedBox(width: 6),
-              const Text('Lugar asegurado', style: TextStyle(fontSize: 11, color: Colors.grey)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          if (titularesConfirmados.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8.0),
-              child: Text(
-                'Aún no hay jugadores asegurados.',
-                style: TextStyle(color: Colors.grey),
-              ),
-            )
-          else
-            ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: titularesConfirmados.length,
-              itemBuilder: (context, index) {
-                final j = titularesConfirmados[index];
-                final esYo = sonElMismoJugador(j.nombre, widget.nombreJugador);
-
-                return Card(
-                  margin: const EdgeInsets.symmetric(vertical: 4),
-                  color: esYo
-                      ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.15)
-                      : Colors.white.withValues(alpha: 0.03),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    side: esYo
-                        ? BorderSide(color: Theme.of(context).colorScheme.primary)
-                        : BorderSide.none,
-                  ),
-                  child: ListTile(
-                    dense: true,
-                    leading: CircleAvatar(
-                      radius: 14,
-                      backgroundColor: Colors.green.shade800,
-                      child: Text(
-                        '${index + 1}',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
+              const SizedBox(height: 16),
+              Card(
+                color: Colors.white.withValues(alpha: 0.05),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                child: Padding(
+                  padding: const EdgeInsets.all(12.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '¿Jugás esta semana?',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
                       ),
-                    ),
-                    title: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            j.nombre,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                      const SizedBox(height: 10),
+                      if (widget.esBaneado)
+                        Container(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          alignment: Alignment.center,
+                          child: const Text(
+                            'Usuario restringido para confirmar convocatoria.',
                             style: TextStyle(
-                              fontWeight: esYo ? FontWeight.bold : FontWeight.normal,
+                              color: Colors.redAccent,
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
-                        ),
-                        if (esYo) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.blueAccent,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: const Text(
-                              'Tú',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
+                        )
+                      else
+                        Row(
+                          children: [
+                            Expanded(
+                              child: FilledButton.icon(
+                                onPressed: () => _cambiarEstadoJugador(jugadorActualObj, 'confirmado'),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: miEstado == 'confirmado'
+                                      ? const Color(0xFF1B5E20)
+                                      : Colors.grey.shade800,
+                                  foregroundColor: Colors.white,
+                                ),
+                                icon: const Icon(Icons.check, size: 18),
+                                label: const Text('Confirmo'),
                               ),
                             ),
-                          ),
-                        ],
-                      ],
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.check_circle_outline, color: Colors.greenAccent, size: 16),
-                            SizedBox(width: 4),
-                            Text(
-                              'Juega',
-                              style: TextStyle(
-                                color: Colors.greenAccent,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: () => _cambiarEstadoJugador(jugadorActualObj, 'baja'),
+                                style: OutlinedButton.styleFrom(
+                                  side: BorderSide(
+                                    color: miEstado == 'baja' ? Colors.redAccent : Colors.grey.shade700,
+                                  ),
+                                ),
+                                icon: Icon(
+                                  Icons.close,
+                                  size: 18,
+                                  color: miEstado == 'baja' ? Colors.redAccent : Colors.grey,
+                                ),
+                                label: Text(
+                                  'Me bajo',
+                                  style: TextStyle(
+                                    color: miEstado == 'baja' ? Colors.redAccent : Colors.grey,
+                                  ),
+                                ),
                               ),
                             ),
                           ],
                         ),
-                        _buildBotonAdmin(j, 'confirmado'),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          if (enEsperaConfirmados.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'En Espera (Confirmaron)',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.orangeAccent,
+                    ],
                   ),
                 ),
-                Text(
-                  '${enEsperaConfirmados.length}',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: enEsperaConfirmados.length,
-              itemBuilder: (context, index) {
-                final j = enEsperaConfirmados[index];
-                final esYo = sonElMismoJugador(j.nombre, widget.nombreJugador);
-
-                return Card(
-                  margin: const EdgeInsets.symmetric(vertical: 4),
-                  color: Colors.orangeAccent.withValues(alpha: 0.08),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    side: BorderSide(color: Colors.orangeAccent.withValues(alpha: 0.3)),
-                  ),
-                  child: ListTile(
-                    dense: true,
-                    leading: CircleAvatar(
-                      radius: 14,
-                      backgroundColor: Colors.orange.shade900,
-                      child: Text(
-                        '${index + 1}',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Titulares Confirmados ($totalTitulares / $cupoMaximo)',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.greenAccent,
                       ),
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    title: Row(
-                      children: [
-                        Expanded(
+                  ),
+                  const SizedBox(width: 6),
+                  const Text('Lugar asegurado', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                ],
+              ),
+              const SizedBox(height: 8),
+              if (titularesConfirmados.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8.0),
+                  child: Text(
+                    'Aún no hay jugadores asegurados.',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                )
+              else
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: titularesConfirmados.length,
+                  itemBuilder: (context, index) {
+                    final j = titularesConfirmados[index];
+                    final esYo = sonElMismoJugador(j.nombre, widget.nombreJugador);
+
+                    return Card(
+                      key: ValueKey(j.nombre),
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      color: Colors.white.withValues(alpha: 0.03),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: ListTile(
+                        dense: true,
+                        leading: CircleAvatar(
+                          radius: 14,
+                          backgroundColor: Colors.green.shade800,
                           child: Text(
-                            j.nombre,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                            '${index + 1}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
-                        if (esYo) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.blueAccent,
-                              borderRadius: BorderRadius.circular(4),
+                        title: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                j.nombre,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontWeight: esYo ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              ),
                             ),
-                            child: const Text(
-                              'Tú',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: Colors.white,
+                            if (esYo) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.blueAccent,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  'Tú',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.check_circle_outline, color: Colors.greenAccent, size: 16),
+                                SizedBox(width: 4),
+                                Text(
+                                  'Juega',
+                                  style: TextStyle(
+                                    color: Colors.greenAccent,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            _buildBotonAdmin(j, 'confirmado'),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              if (enEsperaConfirmados.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'En Espera (Confirmaron)',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.orangeAccent,
+                      ),
+                    ),
+                    Text(
+                      '${enEsperaConfirmados.length}',
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: enEsperaConfirmados.length,
+                  itemBuilder: (context, index) {
+                    final j = enEsperaConfirmados[index];
+                    final esYo = sonElMismoJugador(j.nombre, widget.nombreJugador);
+
+                    return Card(
+                      key: ValueKey(j.nombre),
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      color: Colors.orangeAccent.withValues(alpha: 0.08),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        side: BorderSide(color: Colors.orangeAccent.withValues(alpha: 0.3)),
+                      ),
+                      child: ListTile(
+                        dense: true,
+                        leading: CircleAvatar(
+                          radius: 14,
+                          backgroundColor: Colors.orange.shade900,
+                          child: Text(
+                            '${index + 1}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                        title: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                j.nombre,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (esYo) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.blueAccent,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  'Tú',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        subtitle: Text(
+                          prioritariosPendientes.isNotEmpty
+                              ? 'Esperando respuesta de ${prioritariosPendientes.length} titular(es) con reserva'
+                              : 'Esperando que se libere cupo por baja',
+                          style: const TextStyle(fontSize: 10, color: Colors.white60),
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '${index + 1}° en cola',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.orangeAccent,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                          ),
-                        ],
-                      ],
-                    ),
-                    subtitle: Text(
-                      prioritariosPendientes.isNotEmpty
-                          ? 'Esperando respuesta de ${prioritariosPendientes.length} titular(es) con reserva'
-                          : 'Esperando que se libere cupo por baja',
-                      style: const TextStyle(fontSize: 10, color: Colors.white60),
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          '${index + 1}° en cola',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: Colors.orangeAccent,
-                            fontWeight: FontWeight.bold,
-                          ),
+                            _buildBotonAdmin(j, 'confirmado'),
+                          ],
                         ),
-                        _buildBotonAdmin(j, 'confirmado'),
-                      ],
+                      ),
+                    );
+                  },
+                ),
+              ],
+              if (pendientes.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Sin Responder / Pendientes',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.grey,
+                      ),
                     ),
-                  ),
-                );
-              },
-            ),
-          ],
-          if (pendientes.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Sin Responder / Pendientes',
-                  style: TextStyle(
+                    Text(
+                      '${pendientes.length}',
+                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: pendientes.length,
+                  itemBuilder: (context, index) {
+                    final j = pendientes[index];
+                    final bool esTitularPrioritario =
+                        prioritarios.any((p) => sonElMismoJugador(p.nombre, j.nombre));
+                    final bool esTitularEnRiesgo = !esTitularPrioritario &&
+                        widget.titulares.skip(cupoMaximo).any(
+                              (t) => sonElMismoJugador(t.nombre, j.nombre),
+                            );
+
+                    String subtitulo;
+                    Color colorSubtitulo;
+                    IconData icono;
+
+                    if (esTitularPrioritario) {
+                      subtitulo = 'Cupo reservado por rotación';
+                      colorSubtitulo = Colors.amberAccent;
+                      icono = Icons.shield_outlined;
+                    } else if (esTitularEnRiesgo) {
+                      subtitulo = 'Cupo sujeto a disponibilidad por rotación';
+                      colorSubtitulo = Colors.orangeAccent;
+                      icono = Icons.swap_vert;
+                    } else {
+                      subtitulo = 'Cupo sujeto a disponibilidad por suplencia';
+                      colorSubtitulo = Colors.grey;
+                      icono = Icons.person_outline;
+                    }
+
+                    return Card(
+                      key: ValueKey(j.nombre),
+                      margin: const EdgeInsets.symmetric(vertical: 2),
+                      color: Colors.white.withValues(alpha: 0.02),
+                      child: ListTile(
+                        dense: true,
+                        leading: Icon(
+                          icono,
+                          size: 18,
+                          color: colorSubtitulo,
+                        ),
+                        title: Text(
+                          j.nombre,
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                        subtitle: Text(
+                          subtitulo,
+                          style: TextStyle(fontSize: 10, color: colorSubtitulo),
+                        ),
+                        trailing: _buildBotonAdmin(j, 'pendiente'),
+                      ),
+                    );
+                  },
+                ),
+              ],
+              if (bajas.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Text(
+                  'No juegan (${bajas.length})',
+                  style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
                     color: Colors.grey,
                   ),
                 ),
-                Text(
-                  '${pendientes.length}',
-                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                const SizedBox(height: 8),
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: bajas.length,
+                  itemBuilder: (context, index) {
+                    final j = bajas[index];
+                    return Card(
+                      key: ValueKey(j.nombre),
+                      color: Colors.white.withValues(alpha: 0.03),
+                      margin: const EdgeInsets.symmetric(vertical: 2),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: ListTile(
+                        dense: true,
+                        leading: const Icon(Icons.person_off_outlined, color: Colors.grey, size: 18),
+                        title: Text(
+                          j.nombre,
+                          style: const TextStyle(color: Colors.grey),
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text(
+                              'Baja',
+                              style: TextStyle(
+                                color: Colors.redAccent,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            _buildBotonAdmin(j, 'baja'),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ],
-            ),
-            const SizedBox(height: 8),
-            ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: pendientes.length,
-              itemBuilder: (context, index) {
-                final j = pendientes[index];
-                final bool esTitularPrioritario =
-                    prioritarios.any((p) => sonElMismoJugador(p.nombre, j.nombre));
-                final bool esTitularEnRiesgo = !esTitularPrioritario &&
-                    widget.titulares.skip(cupoMaximo).any(
-                          (t) => sonElMismoJugador(t.nombre, j.nombre),
-                        );
-
-                String subtitulo;
-                Color colorSubtitulo;
-                IconData icono;
-
-                if (esTitularPrioritario) {
-                  subtitulo = 'Cupo reservado por rotación';
-                  colorSubtitulo = Colors.amberAccent;
-                  icono = Icons.shield_outlined;
-                } else if (esTitularEnRiesgo) {
-                  subtitulo = 'Cupo sujeto a disponibilidad por rotación';
-                  colorSubtitulo = Colors.orangeAccent;
-                  icono = Icons.swap_vert;
-                } else {
-                  subtitulo = 'Cupo sujeto a disponibilidad por suplencia';
-                  colorSubtitulo = Colors.grey;
-                  icono = Icons.person_outline;
-                }
-
-                return Card(
-                  margin: const EdgeInsets.symmetric(vertical: 2),
-                  color: Colors.white.withValues(alpha: 0.02),
-                  child: ListTile(
-                    dense: true,
-                    leading: Icon(
-                      icono,
-                      size: 18,
-                      color: colorSubtitulo,
-                    ),
-                    title: Text(
-                      j.nombre,
-                      style: const TextStyle(color: Colors.white70),
-                    ),
-                    subtitle: Text(
-                      subtitulo,
-                      style: TextStyle(fontSize: 10, color: colorSubtitulo),
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text(
-                          'Sin responder',
-                          style: TextStyle(fontSize: 11, color: Colors.grey),
-                        ),
-                        _buildBotonAdmin(j, 'pendiente'),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ],
-          if (bajas.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            Text(
-              'No juegan (${bajas.length})',
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey,
-              ),
-            ),
-            const SizedBox(height: 8),
-            ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: bajas.length,
-              itemBuilder: (context, index) {
-                final j = bajas[index];
-                return Card(
-                  color: Colors.white.withValues(alpha: 0.03),
-                  margin: const EdgeInsets.symmetric(vertical: 2),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: ListTile(
-                    dense: true,
-                    leading: const Icon(Icons.person_off_outlined, color: Colors.grey, size: 18),
-                    title: Text(
-                      j.nombre,
-                      style: const TextStyle(color: Colors.grey),
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text(
-                          'Baja',
-                          style: TextStyle(
-                            color: Colors.redAccent,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        _buildBotonAdmin(j, 'baja'),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ],
-          const SizedBox(height: 24),
-        ],
-      ),
+              const SizedBox(height: 24),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -4755,6 +5163,7 @@ class RotacionScreen extends StatelessWidget {
   final List<Jugador> titulares;
   final List<Jugador> suplentes;
   final String infoPartidoDia;
+  final Map<String, dynamic> asistencia;
   final VoidCallback onAbrirGestionPlantel;
 
   const RotacionScreen({
@@ -4763,6 +5172,7 @@ class RotacionScreen extends StatelessWidget {
     required this.titulares,
     required this.suplentes,
     required this.infoPartidoDia,
+    required this.asistencia,
     required this.onAbrirGestionPlantel,
   });
 
@@ -4903,6 +5313,9 @@ class RotacionScreen extends StatelessWidget {
           dataConfig = snapshotConfig.data!.data() as Map<String, dynamic>;
         }
 
+        final Map<String, dynamic> conteoMap = (dataConfig['conteo'] as Map<String, dynamic>?) ?? {};
+        final String deudorCamisetas = (dataConfig['deudorCamisetas'] ?? '').toString().trim();
+
         final nombresTitulares = titulares.map((t) => t.nombre).toList();
 
         List<String> listaCamisetasAlfabeticas = List.from(nombresTitulares)
@@ -4914,17 +5327,51 @@ class RotacionScreen extends StatelessWidget {
         int indexActual =
             listaCamisetasAlfabeticas.indexWhere((j) => sonElMismoJugador(j, lasTieneGuardado));
         String nombreVisibleLasTiene = lasTieneGuardado;
+
+        // LÓGICA INTELIGENTE DE CAMISETAS
         String leTocaLlevarlas = 'Sin asignar';
+        String motivoTurno = '';
+        String candidatoSalteadoPorBaja = '';
 
         if (listaCamisetasAlfabeticas.isNotEmpty) {
-          if (indexActual != -1) {
-            nombreVisibleLasTiene = listaCamisetasAlfabeticas[indexActual];
-            leTocaLlevarlas = listaCamisetasAlfabeticas[
-                (indexActual + 1) % listaCamisetasAlfabeticas.length];
+          if (indexActual == -1) indexActual = 0;
+          nombreVisibleLasTiene = listaCamisetasAlfabeticas[indexActual];
+
+          // 1. Si hay un deudor que debe su turno y juega este partido, le toca a él
+          final String estadoDeudor = asistencia[deudorCamisetas]?.toString() ?? '';
+          if (deudorCamisetas.isNotEmpty && estadoDeudor == 'confirmado') {
+            leTocaLlevarlas = deudorCamisetas;
+            motivoTurno = '(Debe su turno de una fecha anterior)';
           } else {
-            leTocaLlevarlas = listaCamisetasAlfabeticas.first;
+            // 2. Si no, buscar el siguiente en el orden natural
+            final String siguienteNatural =
+                listaCamisetasAlfabeticas[(indexActual + 1) % listaCamisetasAlfabeticas.length];
+            final String estadoSiguiente = asistencia[siguienteNatural]?.toString() ?? '';
+
+            if (estadoSiguiente == 'baja') {
+              candidatoSalteadoPorBaja = siguienteNatural;
+              // Buscar el primer jugador siguiente que no esté de baja
+              for (int step = 2; step <= listaCamisetasAlfabeticas.length; step++) {
+                final cand =
+                    listaCamisetasAlfabeticas[(indexActual + step) % listaCamisetasAlfabeticas.length];
+                final est = asistencia[cand]?.toString() ?? '';
+                if (est != 'baja') {
+                  leTocaLlevarlas = cand;
+                  motivoTurno = '($siguienteNatural se dio de baja, pasa al siguiente)';
+                  break;
+                }
+              }
+              if (leTocaLlevarlas == 'Sin asignar') {
+                leTocaLlevarlas = siguienteNatural;
+              }
+            } else {
+              leTocaLlevarlas = siguienteNatural;
+            }
           }
         }
+
+        final int vecesLasTiene = (conteoMap[nombreVisibleLasTiene] ?? 0) as int;
+        final int vecesLeToca = (conteoMap[leTocaLlevarlas] ?? 0) as int;
 
         final verdes = nombresTitulares.take(10).toList();
         final rojos = nombresTitulares.skip(10).toList();
@@ -5010,9 +5457,18 @@ class RotacionScreen extends StatelessWidget {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text(
-                                    'Las tiene:',
-                                    style: TextStyle(fontSize: 11, color: Colors.grey),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      const Text(
+                                        'Las tiene:',
+                                        style: TextStyle(fontSize: 11, color: Colors.grey),
+                                      ),
+                                      Text(
+                                        'Lavó $vecesLasTiene veces',
+                                        style: const TextStyle(fontSize: 11, color: Colors.tealAccent),
+                                      ),
+                                    ],
                                   ),
                                   Text(
                                     nombreVisibleLasTiene,
@@ -5048,9 +5504,18 @@ class RotacionScreen extends StatelessWidget {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text(
-                                    'Le toca llevarlas:',
-                                    style: TextStyle(fontSize: 11, color: Colors.lightBlueAccent),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      const Text(
+                                        'Le toca llevarlas:',
+                                        style: TextStyle(fontSize: 11, color: Colors.lightBlueAccent),
+                                      ),
+                                      Text(
+                                        'Lavó $vecesLeToca veces',
+                                        style: const TextStyle(fontSize: 11, color: Colors.white70),
+                                      ),
+                                    ],
                                   ),
                                   Text(
                                     leTocaLlevarlas,
@@ -5060,12 +5525,77 @@ class RotacionScreen extends StatelessWidget {
                                       color: Colors.lightBlueAccent,
                                     ),
                                   ),
+                                  if (motivoTurno.isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 2),
+                                      child: Text(
+                                        motivoTurno,
+                                        style: const TextStyle(
+                                          fontSize: 10,
+                                          color: Colors.orangeAccent,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
                                 ],
                               ),
                             ),
                           ],
                         ),
                       ),
+                      if (deudorCamisetas.isNotEmpty && deudorCamisetas != leTocaLlevarlas)
+                        Container(
+                          margin: const EdgeInsets.only(top: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.orangeAccent.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.info_outline, size: 14, color: Colors.orangeAccent),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'Pendiente: $deudorCamisetas debe su turno (se le asignará en cuanto confirme asistencia).',
+                                  style: const TextStyle(fontSize: 10, color: Colors.orangeAccent),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (esAdmin) ...[
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.lightBlueAccent,
+                              side: const BorderSide(color: Colors.lightBlueAccent),
+                            ),
+                            icon: const Icon(Icons.done_all, size: 16),
+                            label: Text('Confirmar entrega a $leTocaLlevarlas'),
+                            onPressed: () async {
+                              final int countActual = (conteoMap[leTocaLlevarlas] ?? 0) as int;
+                              final Map<String, dynamic> nuevoConteo = Map<String, dynamic>.from(conteoMap);
+                              nuevoConteo[leTocaLlevarlas] = countActual + 1;
+
+                              String nuevoDeudor = deudorCamisetas;
+                              if (leTocaLlevarlas == deudorCamisetas) {
+                                nuevoDeudor = '';
+                              } else if (candidatoSalteadoPorBaja.isNotEmpty) {
+                                nuevoDeudor = candidatoSalteadoPorBaja;
+                              }
+
+                              await docRefConfig.set({
+                                'lasTiene': leTocaLlevarlas,
+                                'conteo': nuevoConteo,
+                                'deudorCamisetas': nuevoDeudor,
+                              }, SetOptions(merge: true));
+                            },
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -5158,6 +5688,8 @@ class RotacionScreen extends StatelessWidget {
                   itemCount: verdes.length,
                   itemBuilder: (context, index) {
                     final jugador = verdes[index];
+                    final int vecesLavadas = (conteoMap[jugador] ?? 0) as int;
+
                     return Card(
                       margin: const EdgeInsets.symmetric(vertical: 3),
                       color: const Color(0xFF14291E),
@@ -5183,13 +5715,30 @@ class RotacionScreen extends StatelessWidget {
                           jugador,
                           style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
                         ),
-                        trailing: const Text(
-                          'Titular asegurado',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.greenAccent,
-                            fontWeight: FontWeight.w600,
-                          ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                '👕 $vecesLavadas ${vecesLavadas == 1 ? 'vez' : 'veces'}',
+                                style: const TextStyle(fontSize: 11, color: Colors.tealAccent),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Titular',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.greenAccent,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     );
@@ -5234,6 +5783,8 @@ class RotacionScreen extends StatelessWidget {
                   itemBuilder: (context, index) {
                     final jugador = rojos[index];
                     final pos = index + 11;
+                    final int vecesLavadas = (conteoMap[jugador] ?? 0) as int;
+
                     return Card(
                       margin: const EdgeInsets.symmetric(vertical: 3),
                       color: const Color(0xFF2D1515),
@@ -5262,13 +5813,30 @@ class RotacionScreen extends StatelessWidget {
                             color: Colors.white70,
                           ),
                         ),
-                        trailing: Text(
-                          '${index + 1}° en entrar si hay baja',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: Colors.redAccent,
-                            fontWeight: FontWeight.bold,
-                          ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                '👕 $vecesLavadas',
+                                style: const TextStyle(fontSize: 11, color: Colors.white70),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              '${index + 1}° en entrar si hay baja',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.redAccent,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     );
