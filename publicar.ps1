@@ -7,12 +7,12 @@ if (-not (Test-Path $firebaseBin)) {
     exit 1
 }
 
-# 1. Leer y auto-incrementar la version en lib/main.dart
-$mainPath = "lib\main.dart"
-$mainContent = Get-Content $mainPath -Raw
-$match = [regex]::Match($mainContent, "gAppVersion\s*=\s*'(\d+)\.(\d+)\.(\d+)'")
+# 1. Leer y auto-incrementar la version en lib/constants.dart
+$constantsPath = "lib\constants.dart"
+$constantsContent = Get-Content $constantsPath -Raw
+$match = [regex]::Match($constantsContent, "gAppVersion\s*=\s*'(\d+)\.(\d+)\.(\d+)'")
 if (-not $match.Success) {
-    Write-Host "[ERROR] No se encontro gAppVersion con formato X.Y.Z en $mainPath" -ForegroundColor Red
+    Write-Host "[ERROR] No se encontro gAppVersion con formato X.Y.Z en $constantsPath" -ForegroundColor Red
     exit 1
 }
 
@@ -22,8 +22,8 @@ $patch = [int]$match.Groups[3].Value + 1
 $nuevaVersion = "$major.$minor.$patch"
 $tag = "v$nuevaVersion"
 
-$nuevoMain = [regex]::Replace($mainContent, "gAppVersion\s*=\s*'[^']+'", "gAppVersion = '$nuevaVersion'")
-Set-Content $mainPath -Value $nuevoMain -NoNewline
+$nuevoConstants = [regex]::Replace($constantsContent, "gAppVersion\s*=\s*'[^']+'", "gAppVersion = '$nuevaVersion'")
+Set-Content $constantsPath -Value $nuevoConstants -NoNewline
 
 # 2. Sincronizar pubspec.yaml automaticamente
 $pubspecPath = "pubspec.yaml"
