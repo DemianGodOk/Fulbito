@@ -412,7 +412,7 @@ class RotacionScreen extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    '👕 $veces ${veces == 1 ? 'vez' : 'veces'}',
+                    '👕 $veces',
                     style: const TextStyle(fontSize: 11, color: Colors.tealAccent, fontWeight: FontWeight.w600),
                   ),
                   if (esAdmin) ...[
@@ -826,9 +826,9 @@ class RotacionScreen extends StatelessWidget {
                             buildChipLavados(jugador, vecesLavadas),
                             const SizedBox(width: 8),
                             Text(
-                              '${index + 1}° en entrar si hay baja',
+                              '${index + 1}° en entrar',
                               style: const TextStyle(
-                                fontSize: 11,
+                                fontSize: 10,
                                 color: Colors.redAccent,
                                 fontWeight: FontWeight.bold,
                               ),

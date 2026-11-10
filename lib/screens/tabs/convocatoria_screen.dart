@@ -142,7 +142,18 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
     final Map<String, dynamic> asistencia =
         (widget.infoPartido['asistencia'] as Map<String, dynamic>?) ?? {};
 
+    final int? inicioTorneoMillis = widget.infoPartido['fechaInicioTorneoMillis'] as int?;
     final int? finTorneoMillis = widget.infoPartido['fechaFinTorneoMillis'] as int?;
+
+    int totalFechas = 0;
+    if (inicioTorneoMillis != null && finTorneoMillis != null) {
+      final dtInicio = DateTime.fromMillisecondsSinceEpoch(inicioTorneoMillis);
+      final dtFin = DateTime.fromMillisecondsSinceEpoch(finTorneoMillis);
+      final int dias = dtFin.difference(dtInicio).inDays;
+      if (dias >= 0) {
+        totalFechas = (dias / 7).round() + 1;
+      }
+    }
 
     final List<Jugador> prioritarios = widget.titulares.take(cupoMaximo).toList();
     final List<Jugador> colaEspera = [
@@ -207,7 +218,10 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
       builder: (context, snapHistorial) {
         final docsHistorial = snapHistorial.data?.docs ?? [];
         final int nroFechaCalculada = docsHistorial.length + 1;
-        final String tituloFecha = 'Fecha $nroFechaCalculada';
+        String tituloFecha = 'Fecha $nroFechaCalculada';
+        if (totalFechas > 0) {
+          tituloFecha = 'Fecha $nroFechaCalculada de $totalFechas';
+        }
 
         String campeon = '';
         bool torneoTerminado = false;

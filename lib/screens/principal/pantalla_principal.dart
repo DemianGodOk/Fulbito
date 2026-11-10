@@ -330,7 +330,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
               SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Configurar Partido y Torneo',
+                  'Configurar Torneo',
                   style: TextStyle(fontSize: 17),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -935,7 +935,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                               Icon(Icons.people_alt, size: 18, color: Colors.orangeAccent),
                               SizedBox(width: 8),
                               Text(
-                                'Gestionar Plantel',
+                                'Gestionar plantel',
                                 style: TextStyle(color: Colors.orangeAccent),
                               ),
                             ],
@@ -948,7 +948,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                               Icon(Icons.settings, size: 18, color: Colors.lightBlueAccent),
                               SizedBox(width: 8),
                               Text(
-                                'Configurar partido',
+                                'Configurar torneo',
                                 style: TextStyle(color: Colors.lightBlueAccent),
                               ),
                             ],
