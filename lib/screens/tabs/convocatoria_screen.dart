@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../constants.dart';
 import '../../models/jugador.dart';
+import '../../utils/notificaciones.dart';
 
 class ConvocatoriaScreen extends StatefulWidget {
   final String nombreJugador;
@@ -32,26 +33,37 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
   Future<void> _cambiarEstadoJugador(Jugador j, String nuevoEstado) async {
+    final int ahora = DateTime.now().millisecondsSinceEpoch;
+    final int notifId = ahora % 100000000;
+
+    final eventoAlerta = {
+      'id': notifId,
+      'tipo': nuevoEstado,
+      'nombre': j.nombre,
+      'ts': ahora,
+    };
+
     try {
       await _db.collection('partidos').doc('actual').update({
         'asistencia.${j.nombre}': nuevoEstado,
-        'alertaCambioAsistencia': {
-          'tipo': nuevoEstado,
-          'nombre': j.nombre,
-          'timestamp': FieldValue.serverTimestamp(),
-        },
-        if (nuevoEstado == 'baja')
-          'ultimaAlerta': {
-            'tipo': 'baja',
-            'nombre': j.nombre,
-            'timestamp': FieldValue.serverTimestamp(),
-          },
+        'historialAlertas': FieldValue.arrayUnion([eventoAlerta]),
       });
     } catch (e) {
       await _db.collection('partidos').doc('actual').set({
         'asistencia': {j.nombre: nuevoEstado},
+        'historialAlertas': [eventoAlerta],
       }, SetOptions(merge: true));
     }
+
+    enviarPushNotificacion(
+      topic: 'admin_fulbito',
+      data: {
+        'tipo': 'asistencia',
+        'estado': nuevoEstado,
+        'nombre': j.nombre,
+        'notifId': '$notifId',
+      },
+    );
   }
 
   Future<void> _enviarWhatsApp(String telefono, String nombre) async {
@@ -84,6 +96,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
 
   Widget _buildBotonAdmin(Jugador j, String estadoActual) {
     if (!widget.esAdmin) return const SizedBox.shrink();
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -144,14 +157,48 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
 
     final int? inicioTorneoMillis = widget.infoPartido['fechaInicioTorneoMillis'] as int?;
     final int? finTorneoMillis = widget.infoPartido['fechaFinTorneoMillis'] as int?;
+    final int? fechaPartidoMillis = widget.infoPartido['fechaMillis'] as int?;
+
+    DateTime? dtInicioNorm;
+    if (inicioTorneoMillis != null) {
+      final raw = DateTime.fromMillisecondsSinceEpoch(inicioTorneoMillis);
+      dtInicioNorm = DateTime(raw.year, raw.month, raw.day);
+    }
+
+    DateTime? dtFinNorm;
+    if (finTorneoMillis != null) {
+      final raw = DateTime.fromMillisecondsSinceEpoch(finTorneoMillis);
+      dtFinNorm = DateTime(raw.year, raw.month, raw.day);
+    }
+
+    DateTime? dtPartidoNorm;
+    if (fechaPartidoMillis != null) {
+      final raw = DateTime.fromMillisecondsSinceEpoch(fechaPartidoMillis);
+      dtPartidoNorm = DateTime(raw.year, raw.month, raw.day);
+    } else {
+      final parsed = parsearFechaEspanol(dia.toString());
+      if (parsed != null) {
+        dtPartidoNorm = DateTime(parsed.year, parsed.month, parsed.day);
+      }
+    }
 
     int totalFechas = 0;
-    if (inicioTorneoMillis != null && finTorneoMillis != null) {
-      final dtInicio = DateTime.fromMillisecondsSinceEpoch(inicioTorneoMillis);
-      final dtFin = DateTime.fromMillisecondsSinceEpoch(finTorneoMillis);
-      final int dias = dtFin.difference(dtInicio).inDays;
+    if (dtInicioNorm != null && dtFinNorm != null) {
+      final int dias = dtFinNorm.difference(dtInicioNorm).inDays;
       if (dias >= 0) {
         totalFechas = (dias / 7).round() + 1;
+      }
+    }
+
+    int? nroFechaPorCalendario;
+    if (dtInicioNorm != null && dtPartidoNorm != null) {
+      final int diasDesdeInicio = dtPartidoNorm.difference(dtInicioNorm).inDays;
+      if (diasDesdeInicio >= 0) {
+        int calc = (diasDesdeInicio / 7).round() + 1;
+        if (totalFechas > 0 && calc > totalFechas) {
+          calc = totalFechas;
+        }
+        nroFechaPorCalendario = calc;
       }
     }
 
@@ -217,7 +264,8 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
       stream: FirebaseFirestore.instance.collection('historial_partidos').snapshots(),
       builder: (context, snapHistorial) {
         final docsHistorial = snapHistorial.data?.docs ?? [];
-        final int nroFechaCalculada = docsHistorial.length + 1;
+        final int nroFechaCalculada =
+            nroFechaPorCalendario ?? (docsHistorial.length + 1);
         String tituloFecha = 'Fecha $nroFechaCalculada';
         if (totalFechas > 0) {
           tituloFecha = 'Fecha $nroFechaCalculada de $totalFechas';
@@ -236,9 +284,9 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
 
           if (hayPartidoFinalCargado || hoyMillis >= finTorneoMillis) {
             torneoTerminado = true;
-
             final Map<String, int> ptsMap = {};
             final Map<String, int> pjMap = {};
+
             for (final d in docsHistorial) {
               final data = d.data() as Map<String, dynamic>;
               final int gA = data['equipoA_goles'] ?? 0;
@@ -534,7 +582,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                 children: [
                   Expanded(
                     child: Text(
-                      'Titulares Confirmados ($totalTitulares / $cupoMaximo)',
+                      'Jugadores Confirmados ($totalTitulares / $cupoMaximo)',
                       style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.bold,

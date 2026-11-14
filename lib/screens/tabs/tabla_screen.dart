@@ -8,6 +8,7 @@ class TablaScreen extends StatefulWidget {
   final bool puedeCargarResultado;
   final String nombreJugador;
   final List<Jugador> titulares;
+  final List<Jugador> suplentes;
 
   const TablaScreen({
     super.key,
@@ -15,6 +16,7 @@ class TablaScreen extends StatefulWidget {
     required this.puedeCargarResultado,
     required this.nombreJugador,
     required this.titulares,
+    required this.suplentes,
   });
 
   @override
@@ -82,17 +84,31 @@ class _TablaScreenState extends State<TablaScreen> {
   void _mostrarDialogoCargarResultado(BuildContext context) async {
     final snapshotPartido =
         await FirebaseFirestore.instance.collection('partidos').doc('actual').get();
-    final Map<String, dynamic> asistencia =
+    final Map<String, dynamic> asistenciaActiva =
         (snapshotPartido.data()?['asistencia'] as Map<String, dynamic>?) ?? {};
+    final Map<String, dynamic> ultimaAsistencia =
+        (snapshotPartido.data()?['ultimaAsistencia'] as Map<String, dynamic>?) ?? {};
 
-    List<String> jugadoresDisponibles = asistencia.entries
+    // Priorizar la asistencia activa (viernes), si está vacía buscar la última guardada (sábado/domingo)
+    Map<String, dynamic> asistenciaUsar = asistenciaActiva;
+    if (!asistenciaActiva.values.contains('confirmado') && ultimaAsistencia.values.contains('confirmado')) {
+      asistenciaUsar = ultimaAsistencia;
+    }
+
+    List<String> jugadoresConfirmados = asistenciaUsar.entries
         .where((e) => e.value == 'confirmado')
         .map((e) => e.key)
         .toList();
 
-    if (jugadoresDisponibles.isEmpty) {
-      jugadoresDisponibles = widget.titulares.map((t) => t.nombre).toList();
-    }
+    List<String> todoElPlantel = [
+      ...widget.titulares.map((t) => t.nombre),
+      ...widget.suplentes.map((s) => s.nombre)
+    ];
+    todoElPlantel.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+
+    // Si no hay confirmados ni siquiera en el historial, mostramos todos por defecto
+    bool mostrarTodos = jugadoresConfirmados.isEmpty;
+    List<String> jugadoresDisponibles = mostrarTodos ? todoElPlantel : List.from(jugadoresConfirmados);
 
     if (!context.mounted) return;
 
@@ -103,8 +119,10 @@ class _TablaScreenState extends State<TablaScreen> {
     final nombreEquipoBCtrl = TextEditingController(text: 'Equipo Amarillo');
     final videoUrlCtrl = TextEditingController();
 
+    // Map para guardar a qué equipo va cada uno (0: ninguno, 1: A, 2: B)
+    // Inicializamos con TODOS los jugadores del plantel en 0 por si el usuario cambia el switch
     final Map<String, int> asignaciones = {
-      for (final j in jugadoresDisponibles) j: 0,
+      for (final j in todoElPlantel) j: 0,
     };
 
     showModalBottomSheet(
@@ -274,11 +292,44 @@ class _TablaScreenState extends State<TablaScreen> {
                       ],
                     ),
                     const SizedBox(height: 20),
-                    const Text(
-                      'Asignar Equipos (Blanco ➔ Negro ➔ Quitar)',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Asignar Equipos\n(Celeste ➔ Amarillo ➔ Quitar)',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
+                          ),
+                        ),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('Mostrar\ntodos', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, color: Colors.grey)),
+                            Switch(
+                              value: mostrarTodos,
+                              onChanged: (val) {
+                                setModalState(() {
+                                  mostrarTodos = val;
+                                  if (mostrarTodos) {
+                                    jugadoresDisponibles = todoElPlantel;
+                                  } else {
+                                    jugadoresDisponibles = List.from(jugadoresConfirmados);
+                                    // Limpiamos las asignaciones de los que no están en la lista de confirmados
+                                    for (final key in asignaciones.keys.toList()) {
+                                      if (!jugadoresDisponibles.contains(key)) {
+                                        asignaciones[key] = 0;
+                                      }
+                                    }
+                                  }
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 4),
                     Wrap(
                       spacing: 6,
                       runSpacing: 6,
@@ -384,7 +435,7 @@ class _TablaScreenState extends State<TablaScreen> {
     String canonicalizar(String raw) {
       final l = limpiarNombre(raw);
       final base = l.isNotEmpty ? l : raw.trim();
-      for (final t in widget.titulares) {
+      for (final t in [...widget.titulares, ...widget.suplentes]) {
         if (sonElMismoJugador(t.nombre, base)) {
           return t.nombre;
         }
@@ -404,6 +455,10 @@ class _TablaScreenState extends State<TablaScreen> {
 
     final Map<String, int> rachaActual = {};
     final Map<String, int> rachaHistorica = {};
+    final Map<String, int> rachaDerrotasActual = {};
+    final Map<String, int> rachaDerrotasHistorica = {};
+    final Map<String, int> rachaSinGanarActual = {};
+    final Map<String, int> rachaSinGanarHistorica = {};
 
     for (final doc in cronologicos) {
       final data = doc.data() as Map<String, dynamic>;
@@ -468,14 +523,29 @@ class _TablaScreenState extends State<TablaScreen> {
       for (final p in participantes) {
         final enA = teamA.contains(p);
         final gano = enA ? ganaA : ganaB;
+        final perdio = enA ? ganaB : ganaA;
 
         if (gano) {
           rachaActual[p] = (rachaActual[p] ?? 0) + 1;
           if ((rachaActual[p] ?? 0) > (rachaHistorica[p] ?? 0)) {
             rachaHistorica[p] = rachaActual[p] ?? 0;
           }
+          rachaSinGanarActual[p] = 0;
         } else {
           rachaActual[p] = 0;
+          rachaSinGanarActual[p] = (rachaSinGanarActual[p] ?? 0) + 1;
+          if ((rachaSinGanarActual[p] ?? 0) > (rachaSinGanarHistorica[p] ?? 0)) {
+            rachaSinGanarHistorica[p] = rachaSinGanarActual[p] ?? 0;
+          }
+        }
+
+        if (perdio) {
+          rachaDerrotasActual[p] = (rachaDerrotasActual[p] ?? 0) + 1;
+          if ((rachaDerrotasActual[p] ?? 0) > (rachaDerrotasHistorica[p] ?? 0)) {
+            rachaDerrotasHistorica[p] = rachaDerrotasActual[p] ?? 0;
+          }
+        } else {
+          rachaDerrotasActual[p] = 0;
         }
       }
     }
@@ -530,6 +600,29 @@ class _TablaScreenState extends State<TablaScreen> {
       if (entry.value > maxRacha) {
         maxRacha = entry.value;
         rachaJugador = entry.key;
+      }
+    }
+
+    String? mufaJugador;
+    int maxDerrotas = 0;
+    for (final entry in rachaDerrotasHistorica.entries) {
+      if (entry.value > maxDerrotas) {
+        maxDerrotas = entry.value;
+        mufaJugador = entry.key;
+      }
+    }
+
+    String? mufaSubdetalle;
+    if (mufaJugador != null) {
+      final int maxSinGanarMufa = rachaSinGanarHistorica[mufaJugador] ?? maxDerrotas;
+      final bool vigente = (rachaDerrotasActual[mufaJugador] ?? 0) == maxDerrotas;
+      final List<String> notas = [];
+      if (vigente) notas.add('Racha vigente');
+      if (maxSinGanarMufa > maxDerrotas) {
+        notas.add('Llegó a $maxSinGanarMufa seguidos sin ganar');
+      }
+      if (notas.isNotEmpty) {
+        mufaSubdetalle = notas.join(' • ');
       }
     }
 
@@ -656,7 +749,16 @@ class _TablaScreenState extends State<TablaScreen> {
               ? '$maxRacha victorias consecutivas'
               : 'Se necesitan partidos ganados para calcular',
         ),
-        const SizedBox(height: 80),
+        buildStatCard(
+          icon: Icons.sentiment_very_dissatisfied_rounded,
+          iconColor: Colors.purpleAccent,
+          titulo: 'El Mufa',
+          nombrePrincipal: mufaJugador ?? 'Sin datos suficientes',
+          detalle: mufaJugador != null
+              ? '$maxDerrotas ${maxDerrotas == 1 ? 'derrota consecutiva' : 'derrotas consecutivas'}'
+              : 'Se necesitan partidos perdidos para calcular',
+          subdetalle: mufaSubdetalle,
+        ),
       ],
     );
   }
@@ -1228,7 +1330,8 @@ class _TablaScreenState extends State<TablaScreen> {
                   _buildVistaEstadisticas(docs),
                 ],
 
-                const SizedBox(height: 80),
+                if (_vistaSeleccionada == 1 && widget.puedeCargarResultado)
+                  const SizedBox(height: 72),
               ],
             ),
           ),

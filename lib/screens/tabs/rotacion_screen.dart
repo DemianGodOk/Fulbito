@@ -354,30 +354,45 @@ class RotacionScreen extends StatelessWidget {
           if (indexActual == -1) indexActual = 0;
           nombreVisibleLasTiene = listaCamisetasAlfabeticas[indexActual];
 
-          // Si el admin asignó manualmente a alguien:
-          if (leTocaManual.isNotEmpty) {
+          // Helper para buscar el estado en el mapa sin fallar por espacios o mayúsculas
+          String estadoDe(String nombre) {
+            for (final k in asistencia.keys) {
+              if (sonElMismoJugador(k, nombre)) {
+                return (asistencia[k] ?? '').toString();
+              }
+            }
+            return '';
+          }
+
+          // 1. Si el admin asignó manualmente a alguien Y NO se dio de baja:
+          if (leTocaManual.isNotEmpty && estadoDe(leTocaManual) != 'baja') {
             leTocaLlevarlas = leTocaManual;
-            motivoTurno = '(Asignado manualmente por el admin)';
+            motivoTurno = '';
           } else {
-            // 1. Si hay un deudor que debe su turno y juega este partido, le toca a él
-            final String estadoDeudor = asistencia[deudorCamisetas]?.toString() ?? '';
+            // Si fue asignado a mano pero se dio de baja, guardamos el motivo para mostrarlo
+            if (leTocaManual.isNotEmpty && estadoDe(leTocaManual) == 'baja') {
+              motivoTurno = '($leTocaManual fue asignado a mano pero se dio de baja)';
+            }
+
+            // 2. Si hay un deudor que debe su turno y juega este partido, le toca a él
+            final String estadoDeudor = estadoDe(deudorCamisetas);
             if (deudorCamisetas.isNotEmpty && estadoDeudor == 'confirmado') {
               leTocaLlevarlas = deudorCamisetas;
-              motivoTurno = '(Debe su turno de una fecha anterior)';
+              if (motivoTurno.isEmpty) motivoTurno = '(Debe su turno de una fecha anterior)';
             } else {
-              // 2. Si no, buscar el siguiente en el orden natural
+              // 3. Si no, buscar el siguiente en el orden natural
               final String siguienteNatural =
               listaCamisetasAlfabeticas[(indexActual + 1) % listaCamisetasAlfabeticas.length];
-              final String estadoSiguiente = asistencia[siguienteNatural]?.toString() ?? '';
+              final String estadoSiguiente = estadoDe(siguienteNatural);
 
               if (estadoSiguiente == 'baja') {
                 for (int step = 2; step <= listaCamisetasAlfabeticas.length; step++) {
                   final cand =
                   listaCamisetasAlfabeticas[(indexActual + step) % listaCamisetasAlfabeticas.length];
-                  final est = asistencia[cand]?.toString() ?? '';
+                  final est = estadoDe(cand);
                   if (est != 'baja') {
                     leTocaLlevarlas = cand;
-                    motivoTurno = '($siguienteNatural se dio de baja, pasa al siguiente)';
+                    if (motivoTurno.isEmpty) motivoTurno = '($siguienteNatural se dio de baja, pasa al siguiente)';
                     break;
                   }
                 }

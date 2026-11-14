@@ -10,6 +10,10 @@ Future<void> verificarActualizacionGitHub(BuildContext context) async {
   if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
   if (kGitHubUser == 'TU_USUARIO_GITHUB') return;
 
+  // Retrasar 3 segundos para que no interfiera con el arranque en frío (Firebase/Notificaciones)
+  await Future.delayed(const Duration(seconds: 3));
+  if (!context.mounted) return;
+
   try {
     final response = await http.get(
       Uri.parse(

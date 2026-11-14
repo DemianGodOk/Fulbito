@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../constants.dart';
 import '../../models/jugador.dart';
 import '../../utils/notificaciones.dart';
@@ -34,25 +35,161 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
   int _indiceActual = 0;
   String? _ultimoRecordatorioProgramado;
   bool _verificandoSemana = false;
-  DateTime _ultimaAlertaNotificada = DateTime.now();
   DateTime _ultimoRegistroNotificado = DateTime.now();
-  DateTime _ultimoCambioAsistenciaNotificado = DateTime.now();
-  DateTime _ultimoVestuarioNotificado = DateTime.now();
+  int _ultimoHistorialAlertaProcesadoTs = DateTime.now().millisecondsSinceEpoch;
   String _ultimaSemanaVerificadaClave = '';
+  bool _notifChatHabilitada = true;
+  String _ultimaConfigNotifKey = '';
 
   @override
   void initState() {
     super.initState();
-    _ultimaAlertaNotificada = DateTime.now();
     _ultimoRegistroNotificado = DateTime.now();
-    _ultimoCambioAsistenciaNotificado = DateTime.now();
-    _ultimoVestuarioNotificado = DateTime.now();
+    gEnPantallaVestuario = false;
+    _cargarPreferenciasNotificaciones();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         verificarActualizacionGitHub(context);
       }
     });
+  }
+
+  @override
+  void dispose() {
+    gEnPantallaVestuario = false;
+    super.dispose();
+  }
+
+  Future<void> _cargarPreferenciasNotificaciones() async {
+    final prefs = await SharedPreferences.getInstance();
+    bool habilitada = prefs.getBool('notif_chat_habilitada') ?? true;
+    final int? ultimoTsGuardado = prefs.getInt('ultimo_alerta_asistencia_id');
+    if (ultimoTsGuardado != null) {
+      _ultimoHistorialAlertaProcesadoTs = ultimoTsGuardado;
+    } else {
+      await prefs.setInt(
+        'ultimo_alerta_asistencia_id',
+        _ultimoHistorialAlertaProcesadoTs,
+      );
+    }
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null && uid.isNotEmpty) {
+      try {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('usuarios')
+            .doc(uid)
+            .get();
+        if (userDoc.exists && userDoc.data()?['notifChat'] != null) {
+          habilitada = userDoc.data()!['notifChat'] as bool;
+          await prefs.setBool('notif_chat_habilitada', habilitada);
+        }
+      } catch (_) {}
+    }
+
+    if (mounted) {
+      setState(() {
+        _notifChatHabilitada = habilitada;
+        _ultimaConfigNotifKey = '';
+      });
+    }
+  }
+
+  Future<void> _toggleNotifChat(String aliasUsuario) async {
+    final nuevoValor = !_notifChatHabilitada;
+    setState(() {
+      _notifChatHabilitada = nuevoValor;
+      _ultimaConfigNotifKey = '$aliasUsuario-$_esAdmin-$nuevoValor';
+    });
+
+    await configurarSuscripcionesNotificaciones(
+      alias: aliasUsuario,
+      esAdmin: _esAdmin,
+      chatHabilitado: nuevoValor,
+    );
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null && uid.isNotEmpty) {
+      try {
+        await FirebaseFirestore.instance
+            .collection('usuarios')
+            .doc(uid)
+            .set({'notifChat': nuevoValor}, SetOptions(merge: true));
+      } catch (_) {}
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            nuevoValor
+                ? '🔔 Notificaciones del chat activadas'
+                : '🔕 Notificaciones del chat desactivadas',
+          ),
+          backgroundColor: nuevoValor ? Colors.teal : Colors.blueGrey,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  Future<void> _procesarColaAlertasAsistencia(
+    List<dynamic> historialAlertas,
+    String aliasUsuario,
+  ) async {
+    if (kIsWeb || !_esAdmin || historialAlertas.isEmpty) return;
+
+    final List<Map<String, dynamic>> pendientes = [];
+    for (final item in historialAlertas) {
+      if (item is Map) {
+        final map = Map<String, dynamic>.from(item);
+        final int ts = (map['ts'] as num?)?.toInt() ?? 0;
+        if (ts > _ultimoHistorialAlertaProcesadoTs) {
+          pendientes.add(map);
+        }
+      }
+    }
+
+    if (pendientes.isEmpty) return;
+
+    pendientes.sort(
+      (a, b) => ((a['ts'] as num?)?.toInt() ?? 0)
+          .compareTo((b['ts'] as num?)?.toInt() ?? 0),
+    );
+
+    final int maxTs = (pendientes.last['ts'] as num?)?.toInt() ??
+        _ultimoHistorialAlertaProcesadoTs;
+    _ultimoHistorialAlertaProcesadoTs = maxTs;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('ultimo_alerta_asistencia_id', maxTs);
+
+    for (final alerta in pendientes) {
+      final String nombre = (alerta['nombre'] ?? '').toString();
+      final String tipo = (alerta['tipo'] ?? '').toString();
+      final int notifId = (alerta['id'] as num?)?.toInt() ??
+          (((alerta['ts'] as num?)?.toInt() ?? 0) % 100000000);
+
+      if (nombre.isEmpty || sonElMismoJugador(nombre, aliasUsuario)) continue;
+
+      final esNueva = await marcarNotificacionComoMostrada(notifId);
+      if (!esNueva) continue;
+
+      if (tipo == 'confirmado') {
+        await mostrarNotificacion(
+          id: notifId,
+          titulo: '✅ Confirmación de asistencia',
+          cuerpo: '$nombre confirmó que va a jugar este partido.',
+        );
+      } else if (tipo == 'baja') {
+        await mostrarNotificacion(
+          id: notifId,
+          titulo: '⚠️ Baja registrada',
+          cuerpo: '$nombre avisó que no juega este partido.',
+        );
+      }
+    }
   }
 
   bool get _esAdmin =>
@@ -65,6 +202,8 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
   }
 
   void _revisarProgramacionRecordatorio(Map<String, dynamic> datosPartido) {
+    if (kIsWeb) return;
+
     final int? millis = datosPartido['recordatorioMillis'] as int?;
     final String partidoTexto =
         '${datosPartido['dia'] ?? ''} a las ${datosPartido['hora'] ?? ''}'.trim();
@@ -131,6 +270,17 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
 
       final nuevoDiaTexto = formatearFechaEspanol(nuevaFecha);
 
+      int? nuevoRecordatorioMillis;
+      if (datosPartido['recordatorioMillis'] != null) {
+        DateTime recDt = DateTime.fromMillisecondsSinceEpoch(
+          datosPartido['recordatorioMillis'] as int,
+        ).add(const Duration(days: 7));
+        while (recDt.isBefore(hoy)) {
+          recDt = recDt.add(const Duration(days: 7));
+        }
+        nuevoRecordatorioMillis = recDt.millisecondsSinceEpoch;
+      }
+
       // 1. Obtener datos actuales de camisetas y asistencia para la transición automática
       final Map<String, dynamic> asistenciaPrevia =
           (datosPartido['asistencia'] as Map<String, dynamic>?) ?? {};
@@ -148,35 +298,49 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
           ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
 
         if (nombresTitulares.isNotEmpty) {
+          String estadoDe(String nombre) {
+            for (final k in asistenciaPrevia.keys) {
+              if (sonElMismoJugador(k, nombre)) {
+                return (asistenciaPrevia[k] ?? '').toString();
+              }
+            }
+            return '';
+          }
+
           int idxActual = nombresTitulares.indexWhere((j) => sonElMismoJugador(j, actualTiene));
           if (idxActual == -1) idxActual = 0;
 
-          // Determinar quién se las tenía que llevar
           String destinatario = '';
           String salteado = '';
-          if (manual.isNotEmpty) {
+
+          if (manual.isNotEmpty && estadoDe(manual) != 'baja') {
             destinatario = manual;
-          } else if (deudor.isNotEmpty && asistenciaPrevia[deudor] == 'confirmado') {
-            destinatario = deudor;
           } else {
-            final sig = nombresTitulares[(idxActual + 1) % nombresTitulares.length];
-            if (asistenciaPrevia[sig] == 'baja') {
-              salteado = sig;
-              for (int step = 2; step <= nombresTitulares.length; step++) {
-                final cand = nombresTitulares[(idxActual + step) % nombresTitulares.length];
-                if (asistenciaPrevia[cand] != 'baja') {
-                  destinatario = cand;
-                  break;
-                }
-              }
-              if (destinatario.isEmpty) destinatario = sig;
+            if (manual.isNotEmpty && estadoDe(manual) == 'baja') {
+              salteado = manual;
+            }
+
+            if (deudor.isNotEmpty && estadoDe(deudor) == 'confirmado') {
+              destinatario = deudor;
             } else {
-              destinatario = sig;
+              final sig = nombresTitulares[(idxActual + 1) % nombresTitulares.length];
+              if (estadoDe(sig) == 'baja') {
+                if (salteado.isEmpty) salteado = sig;
+                for (int step = 2; step <= nombresTitulares.length; step++) {
+                  final cand = nombresTitulares[(idxActual + step) % nombresTitulares.length];
+                  if (estadoDe(cand) != 'baja') {
+                    destinatario = cand;
+                    break;
+                  }
+                }
+                if (destinatario.isEmpty) destinatario = sig;
+              } else {
+                destinatario = sig;
+              }
             }
           }
 
           if (destinatario.isNotEmpty) {
-            // El destinatario ahora las tiene y suma 1 lavado
             final int prevCount = (conteo[destinatario] ?? 0) as int;
             conteo[destinatario] = prevCount + 1;
 
@@ -197,10 +361,11 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
         }
       }
 
-      // 2. Actualizar partido con nueva fecha y limpiar convocatoria
+      // 2. Actualizar partido con nueva fecha, recordatorio actualizado y limpiar convocatoria
       await FirebaseFirestore.instance.collection('partidos').doc('actual').set({
         'dia': nuevoDiaTexto,
         'fechaMillis': nuevaFecha.millisecondsSinceEpoch,
+        if (nuevoRecordatorioMillis != null) 'recordatorioMillis': nuevoRecordatorioMillis,
         'asistencia': FieldValue.delete(),
         'ultimaAlerta': FieldValue.delete(),
       }, SetOptions(merge: true));
@@ -318,7 +483,9 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
             datosActuales['recordatorioMillis'] as int)
         : DateTime.now().add(const Duration(days: 1));
 
-    TimeOfDay horaRecordatorioSeleccionada = const TimeOfDay(hour: 10, minute: 0);
+    TimeOfDay horaRecordatorioSeleccionada = datosActuales['recordatorioMillis'] != null
+        ? TimeOfDay.fromDateTime(fechaRecordatorioSeleccionada)
+        : const TimeOfDay(hour: 10, minute: 0);
 
     showDialog(
       context: context,
@@ -500,7 +667,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                     final picked = await showDatePicker(
                       context: context,
                       initialDate: fechaRecordatorioSeleccionada,
-                      firstDate: DateTime.now(),
+                      firstDate: DateTime(2024),
                       lastDate: DateTime(2035),
                     );
                     if (picked != null) {
@@ -644,6 +811,16 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
               plantel: todos,
             );
 
+            final configNotifKey = '$aliasUsuario-$_esAdmin-$_notifChatHabilitada';
+            if (_ultimaConfigNotifKey != configNotifKey) {
+              _ultimaConfigNotifKey = configNotifKey;
+              configurarSuscripcionesNotificaciones(
+                alias: aliasUsuario,
+                esAdmin: _esAdmin,
+                chatHabilitado: _notifChatHabilitada,
+              );
+            }
+
             final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
             final currentEmail = widget.emailJugador.toLowerCase().trim();
             final bool esBaneado = baneadosGlobal.contains(currentEmail) ||
@@ -660,25 +837,14 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
               });
             }
 
-            if (_esAdmin && infoPartido['ultimaAlerta'] != null) {
-              final alerta = infoPartido['ultimaAlerta'];
-              if (alerta is Map<String, dynamic>) {
-                final ts = (alerta['timestamp'] as Timestamp?)?.toDate();
-                if (ts != null && ts.isAfter(_ultimaAlertaNotificada)) {
-                  _ultimaAlertaNotificada = ts;
-                  final nombreAlerta = (alerta['nombre'] ?? '').toString();
-                  if (!sonElMismoJugador(nombreAlerta, aliasUsuario)) {
-                    mostrarNotificacion(
-                      id: 101,
-                      titulo: '⚠️ Jugador dado de baja',
-                      cuerpo: '$nombreAlerta avisó que no juega este partido.',
-                    );
-                  }
-                }
-              }
+            if (!kIsWeb && _esAdmin && infoPartido['historialAlertas'] is List) {
+              _procesarColaAlertasAsistencia(
+                infoPartido['historialAlertas'] as List,
+                aliasUsuario,
+              );
             }
 
-            if (_esAdmin && infoPartido['alertaNuevoUsuario'] != null) {
+            if (!kIsWeb && _esAdmin && infoPartido['alertaNuevoUsuario'] != null) {
               final alertaReg = infoPartido['alertaNuevoUsuario'];
               if (alertaReg is Map<String, dynamic>) {
                 final ts = (alertaReg['timestamp'] as Timestamp?)?.toDate();
@@ -693,95 +859,6 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                       cuerpo:
                           '${alertaReg['nombre']} ($regEmail) se acaba de registrar en la app.',
                     );
-
-                    if (kIsWeb && mounted) {
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                '👤 Nuevo registro: ${alertaReg['nombre']} ($regEmail)',
-                              ),
-                              backgroundColor: Colors.teal,
-                            ),
-                          );
-                        }
-                      });
-                    }
-                  }
-                }
-              }
-            }
-
-            if (_esAdmin && infoPartido['alertaCambioAsistencia'] != null) {
-              final alerta = infoPartido['alertaCambioAsistencia'];
-              if (alerta is Map<String, dynamic>) {
-                final ts = (alerta['timestamp'] as Timestamp?)?.toDate();
-                if (ts != null && ts.isAfter(_ultimoCambioAsistenciaNotificado)) {
-                  _ultimoCambioAsistenciaNotificado = ts;
-
-                  final nombre = (alerta['nombre'] ?? '').toString();
-                  final tipo = (alerta['tipo'] ?? '').toString();
-
-                  if (tipo == 'confirmado') {
-                    mostrarNotificacion(
-                      id: 103,
-                      titulo: '✅ Confirmación de asistencia',
-                      cuerpo: '$nombre confirmó que va a jugar este partido.',
-                    );
-                  } else if (tipo == 'baja') {
-                    mostrarNotificacion(
-                      id: 104,
-                      titulo: '⚠️ Baja registrada',
-                      cuerpo: '$nombre se bajó del partido.',
-                    );
-                  }
-
-                  if (kIsWeb && mounted) {
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (!mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            tipo == 'confirmado'
-                                ? '✅ $nombre confirmó asistencia.'
-                                : '⚠️ $nombre se dio de baja.',
-                          ),
-                          backgroundColor:
-                              tipo == 'confirmado' ? Colors.green : Colors.orange,
-                        ),
-                      );
-                    });
-                  }
-                }
-              }
-            }
-
-            if (_esAdmin && infoPartido['alertaVestuario'] != null) {
-              final aviso = infoPartido['alertaVestuario'];
-              if (aviso is Map<String, dynamic>) {
-                final ts = (aviso['timestamp'] as Timestamp?)?.toDate();
-                if (ts != null && ts.isAfter(_ultimoVestuarioNotificado)) {
-                  _ultimoVestuarioNotificado = ts;
-                  final nombre = (aviso['nombre'] ?? '').toString();
-                  final texto = (aviso['texto'] ?? '').toString();
-
-                  mostrarNotificacion(
-                    id: 105,
-                    titulo: '💬 Mensaje en vestuario',
-                    cuerpo: '$nombre: $texto',
-                  );
-
-                  if (kIsWeb && mounted) {
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (!mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('💬 $nombre escribió en el vestuario'),
-                          backgroundColor: Colors.teal,
-                        ),
-                      );
-                    });
                   }
                 }
               }
@@ -813,6 +890,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                 puedeCargarResultado: _esAdmin || esModerador,
                 nombreJugador: aliasUsuario,
                 titulares: titularesActuales,
+                suplentes: suplentesActuales,
               ),
               RotacionScreen(
                 esAdmin: _esAdmin,
@@ -863,6 +941,8 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                         _mostrarDialogoConfiguracion(context, infoPartido);
                       } else if (value == 'reset') {
                         _confirmarResetConvocatoria(context);
+                      } else if (value == 'notif_chat') {
+                        _toggleNotifChat(aliasUsuario);
                       } else if (value == 'logout') {
                         widget.onCerrarSesion();
                       }
@@ -967,6 +1047,60 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                             ],
                           ),
                         ),
+                        const PopupMenuDivider(),
+                      ],
+                      if (!kIsWeb) ...[
+                        PopupMenuItem(
+                          value: 'notif_chat',
+                          child: Row(
+                            children: [
+                              Icon(
+                                _notifChatHabilitada
+                                    ? Icons.notifications_active
+                                    : Icons.notifications_off_outlined,
+                                size: 18,
+                                color: _notifChatHabilitada
+                                    ? Colors.tealAccent
+                                    : Colors.grey,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Notificación del chat',
+                                  style: TextStyle(
+                                    color: _notifChatHabilitada
+                                        ? Colors.white
+                                        : Colors.grey,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: _notifChatHabilitada
+                                      ? Colors.tealAccent.withValues(alpha: 0.2)
+                                      : Colors.white10,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  _notifChatHabilitada ? 'ON' : 'OFF',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: _notifChatHabilitada
+                                        ? Colors.tealAccent
+                                        : Colors.grey,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuDivider(),
                       ],
                       const PopupMenuItem(
                         value: 'logout',
@@ -997,7 +1131,12 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
               body: pantallas[_indiceActual],
               bottomNavigationBar: NavigationBar(
                 selectedIndex: _indiceActual,
-                onDestinationSelected: (int index) => setState(() => _indiceActual = index),
+                onDestinationSelected: (int index) {
+                  setState(() {
+                    _indiceActual = index;
+                    gEnPantallaVestuario = (index == 3);
+                  });
+                },
                 destinations: const [
                   NavigationDestination(
                     icon: Icon(Icons.sports_soccer_outlined),

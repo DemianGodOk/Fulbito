@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../models/jugador.dart';
+import '../../utils/notificaciones.dart';
 
 class VestuarioScreen extends StatefulWidget {
   final String aliasUsuario;
@@ -32,6 +33,7 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
 
     try {
       final ahora = DateTime.now().millisecondsSinceEpoch;
+      final notifId = ahora % 100000000;
       final limite24hs =
           DateTime.now().subtract(const Duration(hours: 24)).millisecondsSinceEpoch;
 
@@ -65,13 +67,15 @@ class _VestuarioScreenState extends State<VestuarioScreen> {
         'mensajes': filtrados,
       }, SetOptions(merge: true));
 
-      await FirebaseFirestore.instance.collection('partidos').doc('actual').set({
-        'alertaVestuario': {
-          'nombre': widget.aliasUsuario,
+      enviarPushNotificacion(
+        topic: 'chat_vestuario',
+        data: {
+          'tipo': 'chat',
+          'autor': widget.aliasUsuario,
           'texto': txt,
-          'timestamp': FieldValue.serverTimestamp(),
+          'notifId': '$notifId',
         },
-      }, SetOptions(merge: true));
+      );
 
       _scrollHaciaAbajo();
     } catch (e) {
