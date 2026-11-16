@@ -41,11 +41,20 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
   bool _notifChatHabilitada = true;
   String _ultimaConfigNotifKey = '';
 
+  // AGREGADO: Guardamos los streams en memoria para que no se destruyan con cada setState
+  late final Stream<DocumentSnapshot> _streamPartido;
+  late final Stream<DocumentSnapshot> _streamPlantel;
+
   @override
   void initState() {
     super.initState();
     _ultimoRegistroNotificado = DateTime.now();
     gEnPantallaVestuario = false;
+    
+    // Inicializamos los streams una sola vez al abrir la pantalla
+    _streamPartido = FirebaseFirestore.instance.collection('partidos').doc('actual').snapshots();
+    _streamPlantel = FirebaseFirestore.instance.collection('config').doc('plantel').snapshots();
+
     _cargarPreferenciasNotificaciones();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -756,7 +765,8 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection('partidos').doc('actual').snapshots(),
+      // USAMOS LA VARIABLE CACHEADA
+      stream: _streamPartido,
       builder: (context, snapshotPartido) {
         if (snapshotPartido.connectionState == ConnectionState.waiting) {
           return const Scaffold(
@@ -775,33 +785,45 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
         final infoPartido = (snapshotPartido.data!.data() as Map<String, dynamic>?) ?? {};
 
         return StreamBuilder<DocumentSnapshot>(
-          stream: FirebaseFirestore.instance.collection('config').doc('plantel').snapshots(),
+          // USAMOS LA VARIABLE CACHEADA
+          stream: _streamPlantel,
           builder: (context, snapshotPlantel) {
+            
+            if (snapshotPlantel.connectionState == ConnectionState.waiting) {
+              return const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              );
+            }
+            if (!snapshotPlantel.hasData || !snapshotPlantel.data!.exists) {
+               return const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              );
+            }
+
             List<Jugador> titularesActuales = [];
             List<Jugador> suplentesActuales = [];
             List<String> baneadosGlobal = [];
 
-            if (snapshotPlantel.hasData && snapshotPlantel.data!.exists) {
-              final data = snapshotPlantel.data!.data() as Map<String, dynamic>?;
+            final data = snapshotPlantel.data!.data() as Map<String, dynamic>?;
 
-              if (data != null) {
-                if (data['titulares'] != null) {
-                  titularesActuales = (data['titulares'] as List)
-                      .map((e) => Jugador.fromMap(Map<String, dynamic>.from(e)))
-                      .toList();
-                }
-                if (data['suplentes'] != null) {
-                  suplentesActuales = (data['suplentes'] as List)
-                      .map((e) => Jugador.fromMap(Map<String, dynamic>.from(e)))
-                      .toList();
-                }
-                if (data['baneados'] != null) {
-                  baneadosGlobal = (data['baneados'] as List)
-                      .map((e) => e.toString().toLowerCase().trim())
-                      .toList();
-                }
+            if (data != null) {
+              if (data['titulares'] != null) {
+                titularesActuales = (data['titulares'] as List)
+                    .map((e) => Jugador.fromMap(Map<String, dynamic>.from(e)))
+                    .toList();
+              }
+              if (data['suplentes'] != null) {
+                suplentesActuales = (data['suplentes'] as List)
+                    .map((e) => Jugador.fromMap(Map<String, dynamic>.from(e)))
+                    .toList();
+              }
+              if (data['baneados'] != null) {
+                baneadosGlobal = (data['baneados'] as List)
+                    .map((e) => e.toString().toLowerCase().trim())
+                    .toList();
               }
             }
+            
 
             final todos = [...titularesActuales, ...suplentesActuales];
             final aliasUsuario = resolverAliasOPrimerNombre(
@@ -1128,7 +1150,10 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                   const SizedBox(width: 8),
                 ],
               ),
-              body: pantallas[_indiceActual],
+              body: IndexedStack(
+                index: _indiceActual,
+                children: pantallas,
+              ),
               bottomNavigationBar: NavigationBar(
                 selectedIndex: _indiceActual,
                 onDestinationSelected: (int index) {

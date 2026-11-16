@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../models/jugador.dart';
 
-class RotacionScreen extends StatelessWidget {
+// Convertido a StatefulWidget para cachear el stream
+class RotacionScreen extends StatefulWidget {
   final bool esAdmin;
   final List<Jugador> titulares;
   final List<Jugador> suplentes;
@@ -19,6 +20,20 @@ class RotacionScreen extends StatelessWidget {
     required this.asistencia,
     required this.onAbrirGestionPlantel,
   });
+
+  @override
+  State<RotacionScreen> createState() => _RotacionScreenState();
+}
+
+class _RotacionScreenState extends State<RotacionScreen> {
+  late final Stream<DocumentSnapshot> _streamCamisetas;
+
+  @override
+  void initState() {
+    super.initState();
+    // Cacheamos el stream al crear la pantalla
+    _streamCamisetas = FirebaseFirestore.instance.collection('config').doc('camisetas').snapshots();
+  }
 
   String _formatearFechaCorta(String raw) {
     if (raw.isEmpty) return '';
@@ -234,7 +249,7 @@ class RotacionScreen extends StatelessWidget {
   }
 
   void _abrirEditorCola(BuildContext context) {
-    List<Jugador> tempOrden = List.from(titulares);
+    List<Jugador> tempOrden = List.from(widget.titulares);
 
     showModalBottomSheet(
       context: context,
@@ -319,12 +334,17 @@ class RotacionScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final docRefConfig = FirebaseFirestore.instance.collection('config').doc('camisetas');
-    final String fechaCorta = _formatearFechaCorta(infoPartidoDia);
+    final String fechaCorta = _formatearFechaCorta(widget.infoPartidoDia);
 
     return StreamBuilder<DocumentSnapshot>(
-      stream: docRefConfig.snapshots(),
+      // USAMOS LA VARIABLE CACHEADA
+      stream: _streamCamisetas,
       builder: (context, snapshotConfig) {
+        
+        if (snapshotConfig.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
         Map<String, dynamic> dataConfig = {};
         if (snapshotConfig.hasData && snapshotConfig.data!.exists) {
           dataConfig = snapshotConfig.data!.data() as Map<String, dynamic>;
@@ -334,7 +354,7 @@ class RotacionScreen extends StatelessWidget {
         final String deudorCamisetas = (dataConfig['deudorCamisetas'] ?? '').toString().trim();
         final String leTocaManual = (dataConfig['leTocaManual'] ?? '').toString().trim();
 
-        final nombresTitulares = titulares.map((t) => t.nombre).toList();
+        final nombresTitulares = widget.titulares.map((t) => t.nombre).toList();
 
         List<String> listaCamisetasAlfabeticas = List.from(nombresTitulares)
           ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
@@ -356,9 +376,9 @@ class RotacionScreen extends StatelessWidget {
 
           // Helper para buscar el estado en el mapa sin fallar por espacios o mayúsculas
           String estadoDe(String nombre) {
-            for (final k in asistencia.keys) {
+            for (final k in widget.asistencia.keys) {
               if (sonElMismoJugador(k, nombre)) {
-                return (asistencia[k] ?? '').toString();
+                return (widget.asistencia[k] ?? '').toString();
               }
             }
             return '';
@@ -415,13 +435,13 @@ class RotacionScreen extends StatelessWidget {
         Widget buildChipLavados(String jugador, int veces) {
           return InkWell(
             borderRadius: BorderRadius.circular(6),
-            onTap: esAdmin ? () => _dialogoEditarLavados(context, jugador, veces, conteoMap) : null,
+            onTap: widget.esAdmin ? () => _dialogoEditarLavados(context, jugador, veces, conteoMap) : null,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(6),
-                border: esAdmin ? Border.all(color: Colors.tealAccent.withValues(alpha: 0.3)) : null,
+                border: widget.esAdmin ? Border.all(color: Colors.tealAccent.withValues(alpha: 0.3)) : null,
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -430,7 +450,7 @@ class RotacionScreen extends StatelessWidget {
                     '👕 $veces',
                     style: const TextStyle(fontSize: 11, color: Colors.tealAccent, fontWeight: FontWeight.w600),
                   ),
-                  if (esAdmin) ...[
+                  if (widget.esAdmin) ...[
                     const SizedBox(width: 4),
                     const Icon(Icons.edit, size: 10, color: Colors.tealAccent),
                   ],
@@ -514,7 +534,7 @@ class RotacionScreen extends StatelessWidget {
                                 ],
                               ),
                             ),
-                            if (esAdmin) ...[
+                            if (widget.esAdmin) ...[
                               IconButton(
                                 visualDensity: VisualDensity.compact,
                                 padding: EdgeInsets.zero,
@@ -590,7 +610,7 @@ class RotacionScreen extends StatelessWidget {
                                 ],
                               ),
                             ),
-                            if (esAdmin) ...[
+                            if (widget.esAdmin) ...[
                               IconButton(
                                 visualDensity: VisualDensity.compact,
                                 padding: EdgeInsets.zero,
@@ -640,7 +660,7 @@ class RotacionScreen extends StatelessWidget {
                     'Lista de Rotación',
                     style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
                   ),
-                  if (esAdmin)
+                  if (widget.esAdmin)
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -655,7 +675,7 @@ class RotacionScreen extends StatelessWidget {
                             'Plantel',
                             style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                           ),
-                          onPressed: onAbrirGestionPlantel,
+                          onPressed: widget.onAbrirGestionPlantel,
                         ),
                         const SizedBox(width: 6),
                         TextButton.icon(
@@ -854,7 +874,7 @@ class RotacionScreen extends StatelessWidget {
                     );
                   },
                 ),
-              if (suplentes.isNotEmpty) ...[
+              if (widget.suplentes.isNotEmpty) ...[
                 const SizedBox(height: 16),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -880,7 +900,7 @@ class RotacionScreen extends StatelessWidget {
                         ],
                       ),
                       Text(
-                        '${suplentes.length}',
+                        '${widget.suplentes.length}',
                         style: const TextStyle(color: Colors.grey, fontSize: 12),
                       ),
                     ],
@@ -890,9 +910,9 @@ class RotacionScreen extends StatelessWidget {
                 ListView.builder(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
-                  itemCount: suplentes.length,
+                  itemCount: widget.suplentes.length,
                   itemBuilder: (context, index) {
-                    final j = suplentes[index];
+                    final j = widget.suplentes[index];
                     final int vecesLavadas = (conteoMap[j.nombre] ?? 0) as int;
                     return Card(
                       margin: const EdgeInsets.symmetric(vertical: 2),
