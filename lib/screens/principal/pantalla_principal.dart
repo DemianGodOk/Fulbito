@@ -41,7 +41,6 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
   bool _notifChatHabilitada = true;
   String _ultimaConfigNotifKey = '';
 
-  // AGREGADO: Guardamos los streams en memoria para que no se destruyan con cada setState
   late final Stream<DocumentSnapshot> _streamPartido;
   late final Stream<DocumentSnapshot> _streamPlantel;
 
@@ -51,7 +50,6 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
     _ultimoRegistroNotificado = DateTime.now();
     gEnPantallaVestuario = false;
     
-    // Inicializamos los streams una sola vez al abrir la pantalla
     _streamPartido = FirebaseFirestore.instance.collection('partidos').doc('actual').snapshots();
     _streamPlantel = FirebaseFirestore.instance.collection('config').doc('plantel').snapshots();
 
@@ -290,7 +288,6 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
         nuevoRecordatorioMillis = recDt.millisecondsSinceEpoch;
       }
 
-      // 1. Obtener datos actuales de camisetas y asistencia para la transición automática
       final Map<String, dynamic> asistenciaPrevia =
           (datosPartido['asistencia'] as Map<String, dynamic>?) ?? {};
 
@@ -370,7 +367,6 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
         }
       }
 
-      // 2. Actualizar partido con nueva fecha, recordatorio actualizado y limpiar convocatoria
       await FirebaseFirestore.instance.collection('partidos').doc('actual').set({
         'dia': nuevoDiaTexto,
         'fechaMillis': nuevaFecha.millisecondsSinceEpoch,
@@ -765,7 +761,6 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot>(
-      // USAMOS LA VARIABLE CACHEADA
       stream: _streamPartido,
       builder: (context, snapshotPartido) {
         if (snapshotPartido.connectionState == ConnectionState.waiting) {
@@ -783,9 +778,9 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
         }
 
         final infoPartido = (snapshotPartido.data!.data() as Map<String, dynamic>?) ?? {};
+        final String nombreTorneoActual = (infoPartido['nombreTorneo'] ?? kNombreTorneo).toString();
 
         return StreamBuilder<DocumentSnapshot>(
-          // USAMOS LA VARIABLE CACHEADA
           stream: _streamPlantel,
           builder: (context, snapshotPlantel) {
             
@@ -803,6 +798,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
             List<Jugador> titularesActuales = [];
             List<Jugador> suplentesActuales = [];
             List<String> baneadosGlobal = [];
+            List<String> historialTorneos = [];
 
             final data = snapshotPlantel.data!.data() as Map<String, dynamic>?;
 
@@ -822,8 +818,15 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                     .map((e) => e.toString().toLowerCase().trim())
                     .toList();
               }
+              if (data['historial_torneos'] != null) {
+                historialTorneos = List<String>.from(data['historial_torneos']);
+              }
             }
             
+            // Asegurarse de que el torneo actual siempre aparezca en el combo
+            if (nombreTorneoActual.isNotEmpty && !historialTorneos.contains(nombreTorneoActual)) {
+              historialTorneos.add(nombreTorneoActual);
+            }
 
             final todos = [...titularesActuales, ...suplentesActuales];
             final aliasUsuario = resolverAliasOPrimerNombre(
@@ -913,6 +916,8 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                 nombreJugador: aliasUsuario,
                 titulares: titularesActuales,
                 suplentes: suplentesActuales,
+                nombreTorneoActual: nombreTorneoActual,
+                historialTorneos: historialTorneos,
               ),
               RotacionScreen(
                 esAdmin: _esAdmin,

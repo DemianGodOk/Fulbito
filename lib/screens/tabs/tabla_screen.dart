@@ -9,6 +9,8 @@ class TablaScreen extends StatefulWidget {
   final String nombreJugador;
   final List<Jugador> titulares;
   final List<Jugador> suplentes;
+  final String nombreTorneoActual;
+  final List<String> historialTorneos;
 
   const TablaScreen({
     super.key,
@@ -17,6 +19,8 @@ class TablaScreen extends StatefulWidget {
     required this.nombreJugador,
     required this.titulares,
     required this.suplentes,
+    this.nombreTorneoActual = '',
+    this.historialTorneos = const [],
   });
 
   @override
@@ -25,6 +29,28 @@ class TablaScreen extends StatefulWidget {
 
 class _TablaScreenState extends State<TablaScreen> {
   int _vistaSeleccionada = 0;
+  String? _torneoSeleccionado;
+  
+  late Stream<QuerySnapshot> _streamHistorial;
+
+  @override
+  void initState() {
+    super.initState();
+    _torneoSeleccionado = widget.nombreTorneoActual;
+    _actualizarStream();
+  }
+
+  void _actualizarStream() {
+    final String torneoFiltro = 
+        (_torneoSeleccionado != null && widget.historialTorneos.contains(_torneoSeleccionado))
+            ? _torneoSeleccionado!
+            : widget.nombreTorneoActual;
+
+    _streamHistorial = FirebaseFirestore.instance
+        .collection('historial_partidos')
+        .where('torneo', isEqualTo: torneoFiltro)
+        .snapshots();
+  }
 
   void _dialogoEditarVideo(BuildContext context, String docId, String actualUrl) {
     final urlCtrl = TextEditingController(text: actualUrl);
@@ -89,7 +115,6 @@ class _TablaScreenState extends State<TablaScreen> {
     final Map<String, dynamic> ultimaAsistencia =
         (snapshotPartido.data()?['ultimaAsistencia'] as Map<String, dynamic>?) ?? {};
 
-    // Priorizar la asistencia activa (viernes), si está vacía buscar la última guardada (sábado/domingo)
     Map<String, dynamic> asistenciaUsar = asistenciaActiva;
     if (!asistenciaActiva.values.contains('confirmado') && ultimaAsistencia.values.contains('confirmado')) {
       asistenciaUsar = ultimaAsistencia;
@@ -106,7 +131,6 @@ class _TablaScreenState extends State<TablaScreen> {
     ];
     todoElPlantel.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
 
-    // Si no hay confirmados ni siquiera en el historial, mostramos todos por defecto
     bool mostrarTodos = jugadoresConfirmados.isEmpty;
     List<String> jugadoresDisponibles = mostrarTodos ? todoElPlantel : List.from(jugadoresConfirmados);
 
@@ -119,8 +143,6 @@ class _TablaScreenState extends State<TablaScreen> {
     final nombreEquipoBCtrl = TextEditingController(text: 'Equipo Amarillo');
     final videoUrlCtrl = TextEditingController();
 
-    // Map para guardar a qué equipo va cada uno (0: ninguno, 1: A, 2: B)
-    // Inicializamos con TODOS los jugadores del plantel en 0 por si el usuario cambia el switch
     final Map<String, int> asignaciones = {
       for (final j in todoElPlantel) j: 0,
     };
@@ -298,7 +320,7 @@ class _TablaScreenState extends State<TablaScreen> {
                       children: [
                         const Expanded(
                           child: Text(
-                            'Asignar Equipos\n(Celeste ➔ Amarillo ➔ Quitar)',
+                            'Asignar Equipos\n(Celeste -> Amarillo -> Quitar)',
                             style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
                           ),
                         ),
@@ -315,7 +337,6 @@ class _TablaScreenState extends State<TablaScreen> {
                                     jugadoresDisponibles = todoElPlantel;
                                   } else {
                                     jugadoresDisponibles = List.from(jugadoresConfirmados);
-                                    // Limpiamos las asignaciones de los que no están en la lista de confirmados
                                     for (final key in asignaciones.keys.toList()) {
                                       if (!jugadoresDisponibles.contains(key)) {
                                         asignaciones[key] = 0;
@@ -378,6 +399,7 @@ class _TablaScreenState extends State<TablaScreen> {
                         }
 
                         await FirebaseFirestore.instance.collection('historial_partidos').add({
+                          'torneo': widget.nombreTorneoActual, 
                           'fecha': fechaCtrl.text.trim(),
                           'equipoA_nombre': nombreEquipoACtrl.text.trim(),
                           'equipoB_nombre': nombreEquipoBCtrl.text.trim(),
@@ -766,16 +788,24 @@ class _TablaScreenState extends State<TablaScreen> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('historial_partidos')
-          .orderBy('creadoEn', descending: true)
-          .snapshots(),
+      stream: _streamHistorial,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final docs = snapshot.data?.docs ?? [];
+        final docs = snapshot.data?.docs.toList() ?? [];
+        docs.sort((a, b) {
+          final aData = a.data() as Map<String, dynamic>;
+          final bData = b.data() as Map<String, dynamic>;
+          final Timestamp? tA = aData['creadoEn'] as Timestamp?;
+          final Timestamp? tB = bData['creadoEn'] as Timestamp?;
+          if (tA == null && tB == null) return 0;
+          if (tA == null) return 1;
+          if (tB == null) return -1;
+          return tB.compareTo(tA);
+        });
+
         final Map<String, Map<String, dynamic>> stats = {};
 
         for (final doc in docs) {
@@ -854,6 +884,46 @@ class _TablaScreenState extends State<TablaScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                
+                if (widget.historialTorneos.length > 1) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.lightBlueAccent.withValues(alpha: 0.3)),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: _torneoSeleccionado != null && widget.historialTorneos.contains(_torneoSeleccionado) 
+                            ? _torneoSeleccionado 
+                            : widget.historialTorneos.first,
+                        isExpanded: true,
+                        dropdownColor: const Color(0xFF16253B),
+                        icon: const Icon(Icons.keyboard_arrow_down, color: Colors.lightBlueAccent),
+                        items: widget.historialTorneos.map((String torneo) {
+                          return DropdownMenuItem<String>(
+                            value: torneo,
+                            child: Text(
+                              torneo,
+                              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (String? newValue) {
+                          if (newValue != null && newValue != _torneoSeleccionado) {
+                            setState(() {
+                              _torneoSeleccionado = newValue;
+                              _actualizarStream();
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+
                 Container(
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
@@ -1139,7 +1209,7 @@ class _TablaScreenState extends State<TablaScreen> {
                       padding: EdgeInsets.all(24.0),
                       child: Center(
                         child: Text(
-                          'No hay partidos en el historial.',
+                          'No hay partidos en este torneo.',
                           style: TextStyle(color: Colors.grey),
                         ),
                       ),

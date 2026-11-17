@@ -331,7 +331,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
               Card(
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 child: Padding(
-                  padding: const EdgeInsets.all(16.0),
+                  padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 8.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -363,7 +363,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                       ),
                       const SizedBox(height: 12),
                       Container(
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
                         decoration: BoxDecoration(
                           color: Colors.white.withValues(alpha: 0.03),
                           borderRadius: BorderRadius.circular(14),
@@ -392,7 +392,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontWeight: FontWeight.bold,
-                                      fontSize: 18,
+                                      fontSize: 20,
                                     ),
                                   ),
                                 ],
@@ -402,7 +402,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                               width: 1,
                               height: 52,
                               color: Colors.white.withValues(alpha: 0.12),
-                              margin: const EdgeInsets.symmetric(horizontal: 12),
+                              margin: const EdgeInsets.symmetric(horizontal: 8),
                             ),
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.start,

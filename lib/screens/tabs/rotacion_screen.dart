@@ -355,6 +355,7 @@ class _RotacionScreenState extends State<RotacionScreen> {
         final String leTocaManual = (dataConfig['leTocaManual'] ?? '').toString().trim();
 
         final nombresTitulares = widget.titulares.map((t) => t.nombre).toList();
+        final totalTitulares = nombresTitulares.length; // AGREGADO
 
         List<String> listaCamisetasAlfabeticas = List.from(nombresTitulares)
           ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
@@ -793,13 +794,13 @@ class _RotacionScreenState extends State<RotacionScreen> {
                   color: Colors.red.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
-                    Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 16),
-                    SizedBox(width: 6),
+                    const Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 16),
+                    const SizedBox(width: 6),
                     Text(
-                      'EN RIESGO / COLA DE ESPERA (11 - 15)',
-                      style: TextStyle(
+                      'EN RIESGO / COLA DE ESPERA (11 - $totalTitulares)',
+                      style: const TextStyle(
                         color: Colors.redAccent,
                         fontWeight: FontWeight.bold,
                         fontSize: 12,
