@@ -64,6 +64,105 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
         'notifId': '$notifId',
       },
     );
+
+    if (sonElMismoJugador(j.nombre, widget.nombreJugador)) {
+      await _verificarAvisoCamisetas(j.nombre, nuevoEstado);
+    }
+  }
+
+  Future<void> _verificarAvisoCamisetas(String nombreJugador, String nuevoEstado) async {
+    try {
+      final docCamisetas = await _db.collection('config').doc('camisetas').get();
+      if (!docCamisetas.exists || docCamisetas.data() == null) return;
+
+      final dataConfig = docCamisetas.data()!;
+      final String deudorCamisetas = (dataConfig['deudorCamisetas'] ?? '').toString().trim();
+      final String leTocaManual = (dataConfig['leTocaManual'] ?? '').toString().trim();
+
+      final nombresTitulares = widget.titulares.map((t) => t.nombre).toList();
+      if (nombresTitulares.isEmpty) return;
+
+      final List<String> listaCamisetasAlfabeticas = List.from(nombresTitulares)
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+
+      final String lasTieneGuardado = dataConfig['lasTiene'] ?? listaCamisetasAlfabeticas.first;
+      int indexActual = listaCamisetasAlfabeticas.indexWhere((j) => sonElMismoJugador(j, lasTieneGuardado));
+      if (indexActual == -1) indexActual = 0;
+
+      final String nombreVisibleLasTiene = listaCamisetasAlfabeticas[indexActual];
+
+      final Map<String, dynamic> asistenciaActualizada =
+          Map<String, dynamic>.from((widget.infoPartido['asistencia'] as Map<String, dynamic>?) ?? {});
+      asistenciaActualizada[nombreJugador] = nuevoEstado;
+
+      String estadoDe(String nombre) {
+        for (final k in asistenciaActualizada.keys) {
+          if (sonElMismoJugador(k, nombre)) {
+            return (asistenciaActualizada[k] ?? '').toString();
+          }
+        }
+        return '';
+      }
+
+      String leTocaLlevarlas = 'Sin asignar';
+
+      if (leTocaManual.isNotEmpty && estadoDe(leTocaManual) != 'baja') {
+        leTocaLlevarlas = leTocaManual;
+      } else {
+        final String estadoDeudor = estadoDe(deudorCamisetas);
+        if (deudorCamisetas.isNotEmpty && estadoDeudor == 'confirmado') {
+          leTocaLlevarlas = deudorCamisetas;
+        } else {
+          final String siguienteNatural =
+              listaCamisetasAlfabeticas[(indexActual + 1) % listaCamisetasAlfabeticas.length];
+          final String estadoSiguiente = estadoDe(siguienteNatural);
+
+          if (estadoSiguiente == 'baja') {
+            for (int step = 2; step <= listaCamisetasAlfabeticas.length; step++) {
+              final cand =
+                  listaCamisetasAlfabeticas[(indexActual + step) % listaCamisetasAlfabeticas.length];
+              if (estadoDe(cand) != 'baja') {
+                leTocaLlevarlas = cand;
+                break;
+              }
+            }
+            if (leTocaLlevarlas == 'Sin asignar') {
+              leTocaLlevarlas = siguienteNatural;
+            }
+          } else {
+            leTocaLlevarlas = siguienteNatural;
+          }
+        }
+      }
+
+      if (!mounted) return;
+
+      if (sonElMismoJugador(nombreJugador, nombreVisibleLasTiene)) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              '👕 No te olvides las camisetas !!!',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+            ),
+            backgroundColor: Colors.orangeAccent,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      } else if (nuevoEstado == 'confirmado' && sonElMismoJugador(nombreJugador, leTocaLlevarlas)) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              '👕 Te toca llevarte las camisetas !!!',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black),
+            ),
+            backgroundColor: Colors.lightBlueAccent,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (_) {}
   }
 
   Future<void> _enviarWhatsApp(String telefono, String nombre) async {
@@ -371,62 +470,96 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                             color: Colors.lightBlueAccent.withValues(alpha: 0.18),
                           ),
                         ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    tituloFecha,
-                                    style: TextStyle(
-                                      color: Colors.tealAccent.withValues(alpha: 0.9),
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    dia,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 20,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Container(
-                              width: 1,
-                              height: 52,
-                              color: Colors.white.withValues(alpha: 0.12),
-                              margin: const EdgeInsets.symmetric(horizontal: 8),
-                            ),
-                            Column(
+                        child: LayoutBuilder(
+                          builder: (context, constraints) {
+                            const diaStyle = TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 20,
+                            );
+                            const horaStyle = TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 22,
+                            );
+
+                            final textScaler = MediaQuery.textScalerOf(context);
+
+                            final horaPainter = TextPainter(
+                              text: TextSpan(text: hora.toString(), style: horaStyle),
+                              textDirection: TextDirection.ltr,
+                              textScaler: textScaler,
+                            )..layout();
+
+                            // Ancho base disponible para la fecha con la columna de hora en su ancho justo
+                            const double margenSeparador = 17.0; // 8 + 1 + 8
+                            final double anchoDisponibleBase =
+                                constraints.maxWidth - horaPainter.width - margenSeparador;
+
+                            final diaPainter = TextPainter(
+                              text: TextSpan(text: dia.toString(), style: diaStyle),
+                              textDirection: TextDirection.ltr,
+                              textScaler: textScaler,
+                              maxLines: 1,
+                            )..layout(maxWidth: anchoDisponibleBase > 0 ? anchoDisponibleBase : double.infinity);
+
+                            final bool ocupaDosRenglones = diaPainter.didExceedMaxLines;
+                            final double paddingExtraHora = ocupaDosRenglones ? 10.0 : 0.0;
+
+                            return Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  'Horario',
-                                  style: TextStyle(
-                                    color: Colors.tealAccent.withValues(alpha: 0.8),
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.center,
+                                    children: [
+                                      Text(
+                                        tituloFecha,
+                                        style: TextStyle(
+                                          color: Colors.tealAccent.withValues(alpha: 0.9),
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        dia,
+                                        textAlign: TextAlign.center,
+                                        style: diaStyle,
+                                      ),
+                                    ],
                                   ),
                                 ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  hora,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 22,
+                                Container(
+                                  width: 1,
+                                  height: 52,
+                                  color: Colors.white.withValues(alpha: 0.12),
+                                  margin: const EdgeInsets.symmetric(horizontal: 8),
+                                ),
+                                Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: paddingExtraHora),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.center,
+                                    children: [
+                                      Text(
+                                        'Horario',
+                                        style: TextStyle(
+                                          color: Colors.tealAccent.withValues(alpha: 0.8),
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        hora,
+                                        style: horaStyle,
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ],
-                            ),
-                          ],
+                            );
+                          },
                         ),
                       ),
                       const SizedBox(height: 14),

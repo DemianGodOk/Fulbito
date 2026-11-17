@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 
-String gAppVersion = '1.0.29';
+String gAppVersion = '1.0.30';
 const String kGitHubUser = 'DemianGodOk';
 const String kGitHubRepo = 'Fulbito';
 const String kNombreTorneo = 'Torneo Clausura 2026';
