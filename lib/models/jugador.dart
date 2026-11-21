@@ -7,6 +7,7 @@ class Jugador {
   bool esModerador;
   bool baneado;
   String telefono;
+  String fechaNacimiento; // Formato DD/MM/AAAA
 
   Jugador({
     required this.nombre,
@@ -15,6 +16,7 @@ class Jugador {
     this.esModerador = false,
     this.baneado = false,
     this.telefono = '',
+    this.fechaNacimiento = '',
   });
 
   Map<String, dynamic> toMap() => {
@@ -24,6 +26,7 @@ class Jugador {
         'esModerador': esModerador,
         'baneado': baneado,
         'telefono': telefono,
+        'fechaNacimiento': fechaNacimiento,
       };
 
   factory Jugador.fromMap(Map<String, dynamic> map) => Jugador(
@@ -33,7 +36,20 @@ class Jugador {
         esModerador: (map['esModerador'] ?? false) as bool,
         baneado: (map['baneado'] ?? false) as bool,
         telefono: (map['telefono'] ?? '').toString(),
+        fechaNacimiento: (map['fechaNacimiento'] ?? '').toString(),
       );
+
+  DateTime? get fechaNacimientoDateTime {
+    if (fechaNacimiento.trim().isEmpty) return null;
+    final parts = fechaNacimiento.trim().split('/');
+    if (parts.length != 3) return null;
+    final d = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    final y = int.tryParse(parts[2]);
+    if (d == null || m == null || y == null) return null;
+    if (m < 1 || m > 12 || d < 1 || d > 31 || y < 1920) return null;
+    return DateTime(y, m, d);
+  }
 }
 
 String limpiarNombre(String? raw) {

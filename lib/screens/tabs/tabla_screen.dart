@@ -30,7 +30,8 @@ class TablaScreen extends StatefulWidget {
 class _TablaScreenState extends State<TablaScreen> {
   int _vistaSeleccionada = 0;
   String? _torneoSeleccionado;
-  
+  bool _modoAnual = false;
+
   late Stream<QuerySnapshot> _streamHistorial;
 
   @override
@@ -40,16 +41,49 @@ class _TablaScreenState extends State<TablaScreen> {
     _actualizarStream();
   }
 
-  void _actualizarStream() {
-    final String torneoFiltro = 
-        (_torneoSeleccionado != null && widget.historialTorneos.contains(_torneoSeleccionado))
-            ? _torneoSeleccionado!
-            : widget.nombreTorneoActual;
+  int _extraerAnioDeTorneo(String nombreTorneo) {
+    final match = RegExp(r'(20\d{2})').firstMatch(nombreTorneo);
+    if (match != null) {
+      return int.tryParse(match.group(1)!) ?? DateTime.now().year;
+    }
+    return DateTime.now().year;
+  }
 
-    _streamHistorial = FirebaseFirestore.instance
-        .collection('historial_partidos')
-        .where('torneo', isEqualTo: torneoFiltro)
-        .snapshots();
+  int _extraerAnioDeDocumento(Map<String, dynamic> data) {
+    final String torneo = (data['torneo'] ?? '').toString();
+    final matchTorneo = RegExp(r'(20\d{2})').firstMatch(torneo);
+    if (matchTorneo != null) {
+      return int.tryParse(matchTorneo.group(1)!) ?? DateTime.now().year;
+    }
+    final Timestamp? creadoEn = data['creadoEn'] as Timestamp?;
+    if (creadoEn != null) {
+      return creadoEn.toDate().year;
+    }
+    final String fecha = (data['fecha'] ?? '').toString();
+    final matchFecha = RegExp(r'(20\d{2})').firstMatch(fecha);
+    if (matchFecha != null) {
+      return int.tryParse(matchFecha.group(1)!) ?? DateTime.now().year;
+    }
+    return DateTime.now().year;
+  }
+
+  void _actualizarStream() {
+    if (_modoAnual) {
+      // Traemos todos los partidos y filtramos en memoria por el año seleccionado
+      _streamHistorial = FirebaseFirestore.instance
+          .collection('historial_partidos')
+          .snapshots();
+    } else {
+      final String torneoFiltro =
+          (_torneoSeleccionado != null && widget.historialTorneos.contains(_torneoSeleccionado))
+              ? _torneoSeleccionado!
+              : widget.nombreTorneoActual;
+
+      _streamHistorial = FirebaseFirestore.instance
+          .collection('historial_partidos')
+          .where('torneo', isEqualTo: torneoFiltro)
+          .snapshots();
+    }
   }
 
   void _dialogoEditarVideo(BuildContext context, String docId, String actualUrl) {
@@ -399,7 +433,7 @@ class _TablaScreenState extends State<TablaScreen> {
                         }
 
                         await FirebaseFirestore.instance.collection('historial_partidos').add({
-                          'torneo': widget.nombreTorneoActual, 
+                          'torneo': widget.nombreTorneoActual,
                           'fecha': fechaCtrl.text.trim(),
                           'equipoA_nombre': nombreEquipoACtrl.text.trim(),
                           'equipoB_nombre': nombreEquipoBCtrl.text.trim(),
@@ -787,6 +821,12 @@ class _TablaScreenState extends State<TablaScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final String torneoRef =
+        (_torneoSeleccionado != null && widget.historialTorneos.contains(_torneoSeleccionado))
+            ? _torneoSeleccionado!
+            : widget.nombreTorneoActual;
+    final int anioFiltro = _extraerAnioDeTorneo(torneoRef);
+
     return StreamBuilder<QuerySnapshot>(
       stream: _streamHistorial,
       builder: (context, snapshot) {
@@ -794,7 +834,15 @@ class _TablaScreenState extends State<TablaScreen> {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final docs = snapshot.data?.docs.toList() ?? [];
+        List<QueryDocumentSnapshot<Object?>> docs = snapshot.data?.docs.toList() ?? [];
+
+        if (_modoAnual) {
+          docs = docs.where((d) {
+            final data = d.data() as Map<String, dynamic>;
+            return _extraerAnioDeDocumento(data) == anioFiltro;
+          }).toList();
+        }
+
         docs.sort((a, b) {
           final aData = a.data() as Map<String, dynamic>;
           final bData = b.data() as Map<String, dynamic>;
@@ -884,45 +932,116 @@ class _TablaScreenState extends State<TablaScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                
-                if (widget.historialTorneos.length > 1) ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.lightBlueAccent.withValues(alpha: 0.3)),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: _torneoSeleccionado != null && widget.historialTorneos.contains(_torneoSeleccionado) 
-                            ? _torneoSeleccionado 
-                            : widget.historialTorneos.first,
-                        isExpanded: true,
-                        dropdownColor: const Color(0xFF16253B),
-                        icon: const Icon(Icons.keyboard_arrow_down, color: Colors.lightBlueAccent),
-                        items: widget.historialTorneos.map((String torneo) {
-                          return DropdownMenuItem<String>(
-                            value: torneo,
-                            child: Text(
-                              torneo,
-                              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+                Row(
+                  children: [
+                    if (widget.historialTorneos.length > 1)
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: _modoAnual ? 0.02 : 0.05),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: _modoAnual
+                                  ? Colors.white12
+                                  : Colors.lightBlueAccent.withValues(alpha: 0.3),
                             ),
-                          );
-                        }).toList(),
-                        onChanged: (String? newValue) {
-                          if (newValue != null && newValue != _torneoSeleccionado) {
-                            setState(() {
-                              _torneoSeleccionado = newValue;
-                              _actualizarStream();
-                            });
-                          }
-                        },
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: _torneoSeleccionado != null &&
+                                      widget.historialTorneos.contains(_torneoSeleccionado)
+                                  ? _torneoSeleccionado
+                                  : widget.historialTorneos.first,
+                              isExpanded: true,
+                              dropdownColor: const Color(0xFF16253B),
+                              icon: Icon(
+                                Icons.keyboard_arrow_down,
+                                color: _modoAnual ? Colors.grey : Colors.lightBlueAccent,
+                              ),
+                              items: widget.historialTorneos.map((String torneo) {
+                                return DropdownMenuItem<String>(
+                                  value: torneo,
+                                  child: Text(
+                                    _modoAnual ? 'Torneos $anioFiltro' : torneo,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                      color: _modoAnual ? Colors.grey : Colors.white,
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                              onChanged: _modoAnual
+                                  ? null
+                                  : (String? newValue) {
+                                      if (newValue != null && newValue != _torneoSeleccionado) {
+                                        setState(() {
+                                          _torneoSeleccionado = newValue;
+                                          _actualizarStream();
+                                        });
+                                      }
+                                    },
+                            ),
+                          ),
+                        ),
+                      )
+                    else
+                      Expanded(
+                        child: Text(
+                          _modoAnual ? 'Tabla Anual $anioFiltro' : torneoRef,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            color: Colors.lightBlueAccent,
+                          ),
+                        ),
+                      ),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () {
+                        setState(() {
+                          _modoAnual = !_modoAnual;
+                          _actualizarStream();
+                        });
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: _modoAnual
+                              ? Colors.tealAccent.withValues(alpha: 0.18)
+                              : Colors.white.withValues(alpha: 0.05),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: _modoAnual ? Colors.tealAccent : Colors.white12,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _modoAnual ? Icons.check_box : Icons.check_box_outline_blank,
+                              size: 18,
+                              color: _modoAnual ? Colors.tealAccent : Colors.grey,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Anual',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: _modoAnual ? Colors.tealAccent : Colors.white70,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                ],
+                  ],
+                ),
+                const SizedBox(height: 14),
 
                 Container(
                   padding: const EdgeInsets.all(4),
@@ -1205,12 +1324,14 @@ class _TablaScreenState extends State<TablaScreen> {
 
                 if (_vistaSeleccionada == 1) ...[
                   if (docs.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(24.0),
+                    Padding(
+                      padding: const EdgeInsets.all(24.0),
                       child: Center(
                         child: Text(
-                          'No hay partidos en este torneo.',
-                          style: TextStyle(color: Colors.grey),
+                          _modoAnual
+                              ? 'No hay partidos registrados en $anioFiltro.'
+                              : 'No hay partidos en este torneo.',
+                          style: const TextStyle(color: Colors.grey),
                         ),
                       ),
                     )
@@ -1223,6 +1344,7 @@ class _TablaScreenState extends State<TablaScreen> {
                         final data = docs[index].data() as Map<String, dynamic>;
                         final docId = docs[index].id;
                         final fecha = data['fecha'] ?? 'Fecha';
+                        final torneoDoc = (data['torneo'] ?? '').toString();
                         final eqA = data['equipoA_nombre'] ?? 'Equipo Celeste';
                         final eqB = data['equipoB_nombre'] ?? 'Equipo Amarillo';
                         final int golesA = data['equipoA_goles'] ?? 0;
@@ -1242,21 +1364,28 @@ class _TablaScreenState extends State<TablaScreen> {
                                 Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
-                                    Row(
-                                      children: [
-                                        Text(
-                                          fecha,
-                                          style: const TextStyle(
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.lightBlueAccent,
+                                    Expanded(
+                                      child: Row(
+                                        children: [
+                                          Flexible(
+                                            child: Text(
+                                              _modoAnual && torneoDoc.isNotEmpty
+                                                  ? '$fecha • $torneoDoc'
+                                                  : fecha,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold,
+                                                color: Colors.lightBlueAccent,
+                                              ),
+                                            ),
                                           ),
-                                        ),
-                                        if (videoUrl.isNotEmpty) ...[
-                                          const SizedBox(width: 6),
-                                          const Icon(Icons.videocam, color: Colors.tealAccent, size: 16),
+                                          if (videoUrl.isNotEmpty) ...[
+                                            const SizedBox(width: 6),
+                                            const Icon(Icons.videocam, color: Colors.tealAccent, size: 16),
+                                          ],
                                         ],
-                                      ],
+                                      ),
                                     ),
                                     Row(
                                       mainAxisSize: MainAxisSize.min,

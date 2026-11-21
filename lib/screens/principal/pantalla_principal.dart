@@ -36,10 +36,10 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
   String? _ultimoRecordatorioProgramado;
   bool _verificandoSemana = false;
   DateTime _ultimoRegistroNotificado = DateTime.now();
-  int _ultimoHistorialAlertaProcesadoTs = DateTime.now().millisecondsSinceEpoch;
   String _ultimaSemanaVerificadaClave = '';
   bool _notifChatHabilitada = true;
   String _ultimaConfigNotifKey = '';
+  String _ultimaClaveCumpleanosSync = '';
 
   late final Stream<DocumentSnapshot> _streamPartido;
   late final Stream<DocumentSnapshot> _streamPlantel;
@@ -49,7 +49,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
     super.initState();
     _ultimoRegistroNotificado = DateTime.now();
     gEnPantallaVestuario = false;
-    
+
     _streamPartido = FirebaseFirestore.instance.collection('partidos').doc('actual').snapshots();
     _streamPlantel = FirebaseFirestore.instance.collection('config').doc('plantel').snapshots();
 
@@ -70,16 +70,8 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
 
   Future<void> _cargarPreferenciasNotificaciones() async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
     bool habilitada = prefs.getBool('notif_chat_habilitada') ?? true;
-    final int? ultimoTsGuardado = prefs.getInt('ultimo_alerta_asistencia_id');
-    if (ultimoTsGuardado != null) {
-      _ultimoHistorialAlertaProcesadoTs = ultimoTsGuardado;
-    } else {
-      await prefs.setInt(
-        'ultimo_alerta_asistencia_id',
-        _ultimoHistorialAlertaProcesadoTs,
-      );
-    }
 
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null && uid.isNotEmpty) {
@@ -138,64 +130,6 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
           duration: const Duration(seconds: 2),
         ),
       );
-    }
-  }
-
-  Future<void> _procesarColaAlertasAsistencia(
-    List<dynamic> historialAlertas,
-    String aliasUsuario,
-  ) async {
-    if (kIsWeb || !_esAdmin || historialAlertas.isEmpty) return;
-
-    final List<Map<String, dynamic>> pendientes = [];
-    for (final item in historialAlertas) {
-      if (item is Map) {
-        final map = Map<String, dynamic>.from(item);
-        final int ts = (map['ts'] as num?)?.toInt() ?? 0;
-        if (ts > _ultimoHistorialAlertaProcesadoTs) {
-          pendientes.add(map);
-        }
-      }
-    }
-
-    if (pendientes.isEmpty) return;
-
-    pendientes.sort(
-      (a, b) => ((a['ts'] as num?)?.toInt() ?? 0)
-          .compareTo((b['ts'] as num?)?.toInt() ?? 0),
-    );
-
-    final int maxTs = (pendientes.last['ts'] as num?)?.toInt() ??
-        _ultimoHistorialAlertaProcesadoTs;
-    _ultimoHistorialAlertaProcesadoTs = maxTs;
-
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('ultimo_alerta_asistencia_id', maxTs);
-
-    for (final alerta in pendientes) {
-      final String nombre = (alerta['nombre'] ?? '').toString();
-      final String tipo = (alerta['tipo'] ?? '').toString();
-      final int notifId = (alerta['id'] as num?)?.toInt() ??
-          (((alerta['ts'] as num?)?.toInt() ?? 0) % 100000000);
-
-      if (nombre.isEmpty || sonElMismoJugador(nombre, aliasUsuario)) continue;
-
-      final esNueva = await marcarNotificacionComoMostrada(notifId);
-      if (!esNueva) continue;
-
-      if (tipo == 'confirmado') {
-        await mostrarNotificacion(
-          id: notifId,
-          titulo: '✅ Confirmación de asistencia',
-          cuerpo: '$nombre confirmó que va a jugar este partido.',
-        );
-      } else if (tipo == 'baja') {
-        await mostrarNotificacion(
-          id: notifId,
-          titulo: '⚠️ Baja registrada',
-          cuerpo: '$nombre avisó que no juega este partido.',
-        );
-      }
     }
   }
 
@@ -783,14 +717,13 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
         return StreamBuilder<DocumentSnapshot>(
           stream: _streamPlantel,
           builder: (context, snapshotPlantel) {
-            
             if (snapshotPlantel.connectionState == ConnectionState.waiting) {
               return const Scaffold(
                 body: Center(child: CircularProgressIndicator()),
               );
             }
             if (!snapshotPlantel.hasData || !snapshotPlantel.data!.exists) {
-               return const Scaffold(
+              return const Scaffold(
                 body: Center(child: CircularProgressIndicator()),
               );
             }
@@ -822,8 +755,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                 historialTorneos = List<String>.from(data['historial_torneos']);
               }
             }
-            
-            // Asegurarse de que el torneo actual siempre aparezca en el combo
+
             if (nombreTorneoActual.isNotEmpty && !historialTorneos.contains(nombreTorneoActual)) {
               historialTorneos.add(nombreTorneoActual);
             }
@@ -846,6 +778,14 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
               );
             }
 
+            // Sincronizar alarmas y avisos de cumpleaños (10:00 AM) cuando cambia el plantel o el día
+            final hoyStr = '${DateTime.now().year}-${DateTime.now().month}-${DateTime.now().day}';
+            final claveCumples = '$hoyStr-${todos.map((j) => '${j.nombre}:${j.fechaNacimiento}').join('|')}';
+            if (!kIsWeb && _ultimaClaveCumpleanosSync != claveCumples) {
+              _ultimaClaveCumpleanosSync = claveCumples;
+              sincronizarNotificacionesCumpleanos(todos);
+            }
+
             final currentUid = FirebaseAuth.instance.currentUser?.uid ?? '';
             final currentEmail = widget.emailJugador.toLowerCase().trim();
             final bool esBaneado = baneadosGlobal.contains(currentEmail) ||
@@ -860,13 +800,6 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                   titulares: titularesActuales,
                 );
               });
-            }
-
-            if (!kIsWeb && _esAdmin && infoPartido['historialAlertas'] is List) {
-              _procesarColaAlertasAsistencia(
-                infoPartido['historialAlertas'] as List,
-                aliasUsuario,
-              );
             }
 
             if (!kIsWeb && _esAdmin && infoPartido['alertaNuevoUsuario'] != null) {

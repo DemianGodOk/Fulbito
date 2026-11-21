@@ -16,6 +16,7 @@ final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
     FlutterLocalNotificationsPlugin();
 
 bool gEnPantallaVestuario = false;
+StreamSubscription<RemoteMessage>? _onMessageSub;
 
 String? _cachedFcmToken;
 DateTime? _cachedFcmTokenExpiry;
@@ -67,6 +68,14 @@ Future<void> _inicializarPluginLocal() async {
           importance: Importance.max,
         ),
       );
+      await androidImpl.createNotificationChannel(
+        const AndroidNotificationChannel(
+          'fulbito_cumpleanos_channel',
+          'Cumpleaños del Plantel',
+          description: 'Avisos de cumpleaños de los jugadores',
+          importance: Importance.max,
+        ),
+      );
     }
   } catch (e) {
     debugPrint('Error al inicializar plugin local: $e');
@@ -96,7 +105,8 @@ Future<void> inicializarNotificaciones() async {
       sound: true,
     );
 
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+    await _onMessageSub?.cancel();
+    _onMessageSub = FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       procesarMensajePush(message, enPrimerPlano: true);
     });
   } catch (e) {
@@ -119,13 +129,15 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 Future<bool> marcarNotificacionComoMostrada(int id) async {
   try {
     final prefs = await SharedPreferences.getInstance();
+    // IMPORTANTE: recargar desde disco para sincronizar entre isolate background y foreground
+    await prefs.reload();
     final lista = prefs.getStringList('notifs_mostradas_ids') ?? [];
     final idStr = '$id';
     if (lista.contains(idStr)) return false;
 
     lista.add(idStr);
-    if (lista.length > 60) {
-      lista.removeRange(0, lista.length - 60);
+    if (lista.length > 120) {
+      lista.removeRange(0, lista.length - 120);
     }
     await prefs.setStringList('notifs_mostradas_ids', lista);
     return true;
@@ -145,10 +157,20 @@ Future<void> procesarMensajePush(
 
   try {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
     final String miAlias = prefs.getString('alias_usuario') ?? '';
     final String tipo = (data['tipo'] ?? '').toString();
     final int notifId = int.tryParse((data['notifId'] ?? '').toString()) ??
         (DateTime.now().millisecondsSinceEpoch % 100000000);
+
+    // Ignorar mensajes viejos (más de 15 minutos) que Android entregue tarde al encender/abrir
+    final int tsMensaje = int.tryParse((data['ts'] ?? '').toString()) ?? 0;
+    if (tsMensaje > 0) {
+      final int diffMs = DateTime.now().millisecondsSinceEpoch - tsMensaje;
+      if (diffMs > 15 * 60 * 1000) {
+        return;
+      }
+    }
 
     if (tipo == 'chat') {
       final bool chatHabilitado = prefs.getBool('notif_chat_habilitada') ?? true;
@@ -197,6 +219,20 @@ Future<void> procesarMensajePush(
           cuerpo: '$nombre avisó que no juega este partido.',
         );
       }
+    } else if (tipo == 'cumpleanos') {
+      final String mensajeCumple = (data['mensaje'] ?? '').toString();
+      if (mensajeCumple.isEmpty) return;
+
+      final esNueva = await marcarNotificacionComoMostrada(notifId);
+      if (!esNueva) return;
+
+      await mostrarNotificacion(
+        id: notifId,
+        titulo: '🎂 ¡Cumpleaños en el plantel!',
+        cuerpo: mensajeCumple,
+        canalId: 'fulbito_cumpleanos_channel',
+        canalNombre: 'Cumpleaños del Plantel',
+      );
     }
   } catch (e) {
     debugPrint('Error procesando mensaje push: $e');
@@ -221,6 +257,9 @@ Future<void> configurarSuscripcionesNotificaciones({
 
   try {
     final fcm = FirebaseMessaging.instance;
+    // Topic global para todos los usuarios de la app (cumpleaños, avisos generales)
+    await fcm.subscribeToTopic('todos_fulbito');
+
     if (esAdmin) {
       await fcm.subscribeToTopic('admin_fulbito');
     } else {
@@ -280,7 +319,6 @@ Future<String?> _obtenerAccessTokenFcm() async {
     } finally {
       client.close();
     }
-
   } catch (e) {
     debugPrint('Error al obtener token FCM: $e');
     return null;
@@ -298,6 +336,10 @@ Future<void> enviarPushNotificacion({
     final projectId =
         (_cachedServiceAccountJson?['project_id'] ?? 'fulbito-svfc').toString();
 
+    final payloadData = Map<String, String>.from(data);
+    payloadData.putIfAbsent(
+        'ts', () => '${DateTime.now().millisecondsSinceEpoch}');
+
     final response = await http.post(
       Uri.parse(
         'https://fcm.googleapis.com/v1/projects/$projectId/messages:send',
@@ -309,7 +351,7 @@ Future<void> enviarPushNotificacion({
       body: jsonEncode({
         'message': {
           'topic': topic,
-          'data': data,
+          'data': payloadData,
           'android': {
             'priority': 'HIGH',
           },
@@ -410,5 +452,119 @@ Future<void> programarRecordatorioAsistencia({
     }
   } catch (e2) {
     debugPrint('Error al programar recordatorio: $e2');
+  }
+}
+
+/// Programa alarmas locales a las 10:00 AM para el próximo cumpleaños de cada jugador
+/// y dispara el push global a las 10:00 AM en adelante si hoy cumple alguien y aún no se avisó.
+Future<void> sincronizarNotificacionesCumpleanos(List<Jugador> plantel) async {
+  if (kIsWeb) return;
+
+  _configurarZonaHorariaLocal();
+  final ahora = DateTime.now();
+
+  // Cancelar alarmas previas de cumpleaños (rango 2000..2150)
+  for (int id = 2000; id < 2150; id++) {
+    try {
+      await flutterLocalNotificationsPlugin.cancel(id);
+    } catch (_) {}
+  }
+
+  const details = NotificationDetails(
+    android: AndroidNotificationDetails(
+      'fulbito_cumpleanos_channel',
+      'Cumpleaños del Plantel',
+      channelDescription: 'Avisos de cumpleaños de los jugadores',
+      importance: Importance.max,
+      priority: Priority.high,
+    ),
+  );
+
+  int idx = 0;
+  for (final j in plantel) {
+    final nac = j.fechaNacimientoDateTime;
+    if (nac == null || j.nombre.trim().isEmpty) continue;
+
+    // 1. Verificar si HOY es su cumpleaños y ya son las 10:00 AM o más
+    if (nac.month == ahora.month && nac.day == ahora.day && ahora.hour >= 10) {
+      final int edad = ahora.year - nac.year;
+      final String claveDoc = '${ahora.year}-${ahora.month.toString().padLeft(2, '0')}-${ahora.day.toString().padLeft(2, '0')}_${normalizar(j.nombre)}';
+      final String mensaje = 'Hoy ${j.nombre.trim()} cumple $edad años!';
+
+      try {
+        final ref = FirebaseFirestore.instance.collection('cumpleanos_enviados').doc(claveDoc);
+        bool debeEnviar = false;
+        await FirebaseFirestore.instance.runTransaction((tx) async {
+          final snap = await tx.get(ref);
+          if (!snap.exists) {
+            tx.set(ref, {
+              'jugador': j.nombre.trim(),
+              'edad': edad,
+              'enviadoEn': FieldValue.serverTimestamp(),
+            });
+            debeEnviar = true;
+          }
+        });
+
+        if (debeEnviar) {
+          final int notifId = 300000 + (claveDoc.hashCode.abs() % 500000);
+          await enviarPushNotificacion(
+            topic: 'todos_fulbito',
+            data: {
+              'tipo': 'cumpleanos',
+              'mensaje': mensaje,
+              'notifId': '$notifId',
+            },
+          );
+        }
+      } catch (e) {
+        debugPrint('Error al verificar envío push cumpleaños: $e');
+      }
+    }
+
+    // 2. Programar alarma local a las 10:00 AM para el próximo cumpleaños
+    if (idx < 150) {
+      int anioObjetivo = ahora.year;
+      DateTime proximoCumple = DateTime(anioObjetivo, nac.month, nac.day, 10, 0, 0);
+      if (!proximoCumple.isAfter(ahora)) {
+        anioObjetivo += 1;
+        proximoCumple = DateTime(anioObjetivo, nac.month, nac.day, 10, 0, 0);
+      }
+
+      final int edadQueCumple = anioObjetivo - nac.year;
+      final String cuerpoLocal = 'Hoy ${j.nombre.trim()} cumple $edadQueCumple años!';
+      final int alarmId = 2000 + idx;
+
+      try {
+        final tzFecha = tz.TZDateTime.from(proximoCumple, tz.local);
+        await flutterLocalNotificationsPlugin.zonedSchedule(
+          alarmId,
+          '🎂 ¡Cumpleaños en el plantel!',
+          cuerpoLocal,
+          tzFecha,
+          details,
+          uiLocalNotificationDateInterpretation:
+              UILocalNotificationDateInterpretation.absoluteTime,
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        );
+      } catch (_) {
+        try {
+          final tzFecha = tz.TZDateTime.from(proximoCumple, tz.local);
+          await flutterLocalNotificationsPlugin.zonedSchedule(
+            alarmId,
+            '🎂 ¡Cumpleaños en el plantel!',
+            cuerpoLocal,
+            tzFecha,
+            details,
+            uiLocalNotificationDateInterpretation:
+                UILocalNotificationDateInterpretation.absoluteTime,
+            androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          );
+        } catch (e2) {
+          debugPrint('Error programando alarma local cumpleaños: $e2');
+        }
+      }
+      idx++;
+    }
   }
 }

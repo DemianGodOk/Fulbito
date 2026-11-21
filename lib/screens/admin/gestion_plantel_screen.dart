@@ -75,38 +75,91 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
     }
   }
 
-  void _dialogoEditarTelefono(Jugador jugador) {
+  String _formatearFechaNac(DateTime dt) {
+    final d = dt.day.toString().padLeft(2, '0');
+    final m = dt.month.toString().padLeft(2, '0');
+    final y = dt.year.toString();
+    return '$d/$m/$y';
+  }
+
+  void _dialogoEditarDatosJugador(Jugador jugador) {
     final telCtrl = TextEditingController(text: jugador.telefono);
+    final nacCtrl = TextEditingController(text: jugador.fechaNacimiento);
+    DateTime? fechaSeleccionada = jugador.fechaNacimientoDateTime;
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('Teléfono de ${jugador.nombre}'),
-        content: TextField(
-          controller: telCtrl,
-          keyboardType: TextInputType.phone,
-          decoration: const InputDecoration(
-            labelText: 'Número de WhatsApp',
-            hintText: 'Ej: 1123456789',
-            prefixIcon: Icon(Icons.phone, size: 18),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDlgState) => AlertDialog(
+          title: Text('Datos de ${jugador.nombre}'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: telCtrl,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(
+                  labelText: 'Número de WhatsApp',
+                  hintText: 'Ej: 1123456789',
+                  prefixIcon: Icon(Icons.phone, size: 18),
+                ),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: nacCtrl,
+                readOnly: true,
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: fechaSeleccionada ?? DateTime(1992, 1, 1),
+                    firstDate: DateTime(1940),
+                    lastDate: DateTime.now(),
+                    helpText: 'Fecha de nacimiento',
+                  );
+                  if (picked != null) {
+                    setDlgState(() {
+                      fechaSeleccionada = picked;
+                      nacCtrl.text = _formatearFechaNac(picked);
+                    });
+                  }
+                },
+                decoration: InputDecoration(
+                  labelText: 'Fecha de nacimiento',
+                  hintText: 'Tocá para elegir fecha',
+                  prefixIcon: const Icon(Icons.cake_outlined, color: Colors.pinkAccent, size: 18),
+                  suffixIcon: nacCtrl.text.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear, size: 16),
+                          onPressed: () {
+                            setDlgState(() {
+                              fechaSeleccionada = null;
+                              nacCtrl.clear();
+                            });
+                          },
+                        )
+                      : const Icon(Icons.calendar_today, size: 16),
+                ),
+              ),
+            ],
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar', style: TextStyle(color: Colors.grey)),
+            ),
+            FilledButton(
+              onPressed: () {
+                setState(() {
+                  jugador.telefono = telCtrl.text.trim();
+                  jugador.fechaNacimiento = nacCtrl.text.trim();
+                });
+                _guardarEnFirestore();
+                Navigator.pop(ctx);
+              },
+              child: const Text('Guardar'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar', style: TextStyle(color: Colors.grey)),
-          ),
-          FilledButton(
-            onPressed: () {
-              setState(() {
-                jugador.telefono = telCtrl.text.trim();
-              });
-              _guardarEnFirestore();
-              Navigator.pop(ctx);
-            },
-            child: const Text('Guardar'),
-          ),
-        ],
       ),
     );
   }
@@ -114,6 +167,8 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
   void _dialogoNuevoJugador() {
     final nombreCtrl = TextEditingController();
     final telCtrl = TextEditingController();
+    final nacCtrl = TextEditingController();
+    DateTime? fechaSeleccionada;
     bool esTitular = true;
     bool esMod = false;
 
@@ -122,52 +177,90 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDlgState) => AlertDialog(
           title: const Text('Nuevo Jugador'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: nombreCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Nombre o Apodo',
-                  hintText: 'Ej: Nico',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: telCtrl,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(
-                  labelText: 'Teléfono (Opcional)',
-                  hintText: 'Ej: 1123456789',
-                  prefixIcon: Icon(Icons.phone, size: 18),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  ChoiceChip(
-                    label: const Text('Titular (Rotación)'),
-                    selected: esTitular,
-                    onSelected: (val) => setDlgState(() => esTitular = true),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: nombreCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Nombre o Apodo',
+                    hintText: 'Ej: Nico',
                   ),
-                  ChoiceChip(
-                    label: const Text('Suplente'),
-                    selected: !esTitular,
-                    onSelected: (val) => setDlgState(() => esTitular = false),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: telCtrl,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                    labelText: 'Teléfono (Opcional)',
+                    hintText: 'Ej: 1123456789',
+                    prefixIcon: Icon(Icons.phone, size: 18),
                   ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              FilterChip(
-                label: const Text('Rol: Moderador (cargar partidos)'),
-                selected: esMod,
-                selectedColor: Colors.teal.shade900,
-                onSelected: (val) => setDlgState(() => esMod = val),
-              ),
-            ],
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: nacCtrl,
+                  readOnly: true,
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: fechaSeleccionada ?? DateTime(1992, 1, 1),
+                      firstDate: DateTime(1940),
+                      lastDate: DateTime.now(),
+                      helpText: 'Fecha de nacimiento',
+                    );
+                    if (picked != null) {
+                      setDlgState(() {
+                        fechaSeleccionada = picked;
+                        nacCtrl.text = _formatearFechaNac(picked);
+                      });
+                    }
+                  },
+                  decoration: InputDecoration(
+                    labelText: 'Fecha de nacimiento (Opcional)',
+                    hintText: 'DD/MM/AAAA',
+                    prefixIcon: const Icon(Icons.cake_outlined, color: Colors.pinkAccent, size: 18),
+                    suffixIcon: nacCtrl.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 16),
+                            onPressed: () {
+                              setDlgState(() {
+                                fechaSeleccionada = null;
+                                nacCtrl.clear();
+                              });
+                            },
+                          )
+                        : const Icon(Icons.calendar_today, size: 16),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('Titular (Rotación)'),
+                      selected: esTitular,
+                      onSelected: (val) => setDlgState(() => esTitular = true),
+                    ),
+                    ChoiceChip(
+                      label: const Text('Suplente'),
+                      selected: !esTitular,
+                      onSelected: (val) => setDlgState(() => esTitular = false),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                FilterChip(
+                  label: const Text('Rol: Moderador (cargar partidos)'),
+                  selected: esMod,
+                  selectedColor: Colors.teal.shade900,
+                  onSelected: (val) => setDlgState(() => esMod = val),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -182,6 +275,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                     final item = Jugador(
                       nombre: nombre,
                       telefono: telCtrl.text.trim(),
+                      fechaNacimiento: nacCtrl.text.trim(),
                       esModerador: esMod,
                     );
                     if (esTitular) {
@@ -407,6 +501,53 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
     );
   }
 
+  Widget _buildSubtituloJugador(Jugador j, bool vinculado) {
+    final bool tieneTel = j.telefono.trim().isNotEmpty;
+    final bool tieneNac = j.fechaNacimiento.trim().isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          vinculado ? j.email : 'Sin vincular a Google',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 10,
+            color: vinculado ? Colors.greenAccent : Colors.grey,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Wrap(
+          spacing: 8,
+          runSpacing: 2,
+          children: [
+            if (tieneTel)
+              Text(
+                '📞 ${j.telefono}',
+                style: const TextStyle(fontSize: 10, color: Colors.tealAccent),
+              )
+            else
+              const Text(
+                '📞 Sin tel.',
+                style: TextStyle(fontSize: 10, color: Colors.white38),
+              ),
+            if (tieneNac)
+              Text(
+                '🎂 ${j.fechaNacimiento}',
+                style: const TextStyle(fontSize: 10, color: Colors.pinkAccent),
+              )
+            else
+              const Text(
+                '🎂 Sin cumple',
+                style: TextStyle(fontSize: 10, color: Colors.white38),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final todosPlantel = [..._titulares, ..._suplentes];
@@ -476,22 +617,13 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                   const SizedBox(height: 20),
 
                   // Titulares
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Titulares en Rotación (${_titulares.length})',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.greenAccent,
-                        ),
-                      ),
-                      const Text(
-                        'Arriba = más prioridad',
-                        style: TextStyle(fontSize: 11, color: Colors.grey),
-                      ),
-                    ],
+                  Text(
+                    'Titulares en Rotación (${_titulares.length})',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.greenAccent,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   if (_titulares.isEmpty)
@@ -510,6 +642,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                   else
                     ListView.builder(
                       shrinkWrap: true,
+                      padding: EdgeInsets.zero,
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: _titulares.length,
                       itemBuilder: (context, index) {
@@ -522,7 +655,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                           child: ListTile(
                             dense: true,
                             contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                            onTap: () => _dialogoEditarTelefono(j),
+                            onTap: () => _dialogoEditarDatosJugador(j),
                             leading: CircleAvatar(
                               radius: 12,
                               backgroundColor: j.baneado
@@ -589,31 +722,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                                 ],
                               ],
                             ),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  vinculado ? j.email : 'Sin vincular a Google',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: vinculado ? Colors.greenAccent : Colors.grey,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                if (j.telefono.trim().isNotEmpty)
-                                  Text(
-                                    '📞 ${j.telefono}',
-                                    style: const TextStyle(fontSize: 10, color: Colors.tealAccent),
-                                  )
-                                else
-                                  const Text(
-                                    '📞 Sin teléfono (tocá para agregar)',
-                                    style: TextStyle(fontSize: 10, color: Colors.white38),
-                                  ),
-                              ],
-                            ),
+                            subtitle: _buildSubtituloJugador(j, vinculado),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -689,6 +798,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                   else
                     ListView.builder(
                       shrinkWrap: true,
+                      padding: EdgeInsets.zero,
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: _suplentes.length,
                       itemBuilder: (context, index) {
@@ -701,7 +811,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                           child: ListTile(
                             dense: true,
                             contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                            onTap: () => _dialogoEditarTelefono(j),
+                            onTap: () => _dialogoEditarDatosJugador(j),
                             leading: CircleAvatar(
                               radius: 12,
                               backgroundColor: j.baneado ? Colors.red.shade900 : Colors.white12,
@@ -741,31 +851,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                                 ],
                               ],
                             ),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  vinculado ? j.email : 'Sin vincular a Google',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: vinculado ? Colors.greenAccent : Colors.grey,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                if (j.telefono.trim().isNotEmpty)
-                                  Text(
-                                    '📞 ${j.telefono}',
-                                    style: const TextStyle(fontSize: 10, color: Colors.tealAccent),
-                                  )
-                                else
-                                  const Text(
-                                    '📞 Sin teléfono (tocá para agregar)',
-                                    style: TextStyle(fontSize: 10, color: Colors.white38),
-                                  ),
-                              ],
-                            ),
+                            subtitle: _buildSubtituloJugador(j, vinculado),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
@@ -847,6 +933,7 @@ class _GestionPlantelScreenState extends State<GestionPlantelScreen> {
                   else
                     ListView.builder(
                       shrinkWrap: true,
+                      padding: EdgeInsets.zero,
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: noAsociados.length,
                       itemBuilder: (context, index) {

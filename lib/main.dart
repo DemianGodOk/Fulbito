@@ -28,7 +28,6 @@ void main() async {
     }
   } catch (_) {}
 
-  // Inicializar Firebase sin trabar el UI hilo principal
   try {
     if (kIsWeb) {
       await Firebase.initializeApp(
@@ -44,10 +43,7 @@ void main() async {
     } else {
       await Firebase.initializeApp();
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-      // Delegamos la inicialización de FCM para que no congele el arranque
-      inicializarNotificaciones().catchError((e) {
-        debugPrint('Fallo silencioso al cargar notificaciones: $e');
-      });
+      await inicializarNotificaciones();
     }
   } catch (e) {
     debugPrint('Error al inicializar Firebase: $e');
