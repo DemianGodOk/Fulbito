@@ -30,15 +30,71 @@ class TablaScreen extends StatefulWidget {
 class _TablaScreenState extends State<TablaScreen> {
   int _vistaSeleccionada = 0;
   String? _torneoSeleccionado;
-  bool _modoAnual = false;
+  // 0 = Actual (torneo seleccionado), 1 = Anual (año actual), 2 = Histórico (todos los años)
+  int _alcanceFiltro = 0;
 
   late Stream<QuerySnapshot> _streamHistorial;
+  late Stream<QuerySnapshot> _streamVotosFigura;
+
+  List<String> _obtenerTorneosOrdenados([Iterable<String> extraTorneos = const []]) {
+    final setUnicos = <String>{};
+    if (widget.nombreTorneoActual.trim().isNotEmpty) {
+      setUnicos.add(widget.nombreTorneoActual.trim());
+    }
+    for (final t in widget.historialTorneos) {
+      if (t.trim().isNotEmpty) setUnicos.add(t.trim());
+    }
+    for (final t in extraTorneos) {
+      if (t.trim().isNotEmpty) setUnicos.add(t.trim());
+    }
+
+    int pesoTemporada(String nombre) {
+      final low = nombre.toLowerCase();
+      if (low.contains('clausura') || low.contains('final')) return 3;
+      if (low.contains('apertura')) return 2;
+      if (low.contains('verano')) return 1;
+      return 0;
+    }
+
+    final lista = setUnicos.toList();
+    lista.sort((a, b) {
+      if (a == widget.nombreTorneoActual) return -1;
+      if (b == widget.nombreTorneoActual) return 1;
+
+      final anioA = _extraerAnioDeTorneo(a);
+      final anioB = _extraerAnioDeTorneo(b);
+      if (anioA != anioB) return anioB.compareTo(anioA);
+
+      final pesoA = pesoTemporada(a);
+      final pesoB = pesoTemporada(b);
+      if (pesoA != pesoB) return pesoB.compareTo(pesoA);
+
+      return b.compareTo(a);
+    });
+    return lista;
+  }
 
   @override
   void initState() {
     super.initState();
-    _torneoSeleccionado = widget.nombreTorneoActual;
+    final ordenados = _obtenerTorneosOrdenados();
+    _torneoSeleccionado = widget.nombreTorneoActual.isNotEmpty
+        ? widget.nombreTorneoActual
+        : (ordenados.isNotEmpty ? ordenados.first : '');
     _actualizarStream();
+  }
+
+  @override
+  void didUpdateWidget(TablaScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final ordenados = _obtenerTorneosOrdenados();
+    if (oldWidget.nombreTorneoActual != widget.nombreTorneoActual) {
+      _torneoSeleccionado = widget.nombreTorneoActual;
+    } else if (_torneoSeleccionado != null &&
+        ordenados.isNotEmpty &&
+        !ordenados.contains(_torneoSeleccionado)) {
+      _torneoSeleccionado = ordenados.first;
+    }
   }
 
   int _extraerAnioDeTorneo(String nombreTorneo) {
@@ -59,7 +115,8 @@ class _TablaScreenState extends State<TablaScreen> {
     if (creadoEn != null) {
       return creadoEn.toDate().year;
     }
-    final String fecha = (data['fecha'] ?? '').toString();
+    final String fecha =
+        (data['fecha'] ?? data['fechaPartido'] ?? '').toString();
     final matchFecha = RegExp(r'(20\d{2})').firstMatch(fecha);
     if (matchFecha != null) {
       return int.tryParse(matchFecha.group(1)!) ?? DateTime.now().year;
@@ -68,22 +125,10 @@ class _TablaScreenState extends State<TablaScreen> {
   }
 
   void _actualizarStream() {
-    if (_modoAnual) {
-      // Traemos todos los partidos y filtramos en memoria por el año seleccionado
-      _streamHistorial = FirebaseFirestore.instance
-          .collection('historial_partidos')
-          .snapshots();
-    } else {
-      final String torneoFiltro =
-          (_torneoSeleccionado != null && widget.historialTorneos.contains(_torneoSeleccionado))
-              ? _torneoSeleccionado!
-              : widget.nombreTorneoActual;
-
-      _streamHistorial = FirebaseFirestore.instance
-          .collection('historial_partidos')
-          .where('torneo', isEqualTo: torneoFiltro)
-          .snapshots();
-    }
+    _streamHistorial =
+        FirebaseFirestore.instance.collection('historial_partidos').snapshots();
+    _streamVotosFigura =
+        FirebaseFirestore.instance.collection('votos_figura').snapshots();
   }
 
   void _dialogoEditarVideo(BuildContext context, String docId, String actualUrl) {
@@ -150,7 +195,8 @@ class _TablaScreenState extends State<TablaScreen> {
         (snapshotPartido.data()?['ultimaAsistencia'] as Map<String, dynamic>?) ?? {};
 
     Map<String, dynamic> asistenciaUsar = asistenciaActiva;
-    if (!asistenciaActiva.values.contains('confirmado') && ultimaAsistencia.values.contains('confirmado')) {
+    if (!asistenciaActiva.values.contains('confirmado') &&
+        ultimaAsistencia.values.contains('confirmado')) {
       asistenciaUsar = ultimaAsistencia;
     }
 
@@ -166,7 +212,8 @@ class _TablaScreenState extends State<TablaScreen> {
     todoElPlantel.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
 
     bool mostrarTodos = jugadoresConfirmados.isEmpty;
-    List<String> jugadoresDisponibles = mostrarTodos ? todoElPlantel : List.from(jugadoresConfirmados);
+    List<String> jugadoresDisponibles =
+        mostrarTodos ? todoElPlantel : List.from(jugadoresConfirmados);
 
     if (!context.mounted) return;
 
@@ -432,8 +479,14 @@ class _TablaScreenState extends State<TablaScreen> {
                           return;
                         }
 
+                        final String torneoGuardar = (_alcanceFiltro == 0 &&
+                                _torneoSeleccionado != null &&
+                                _torneoSeleccionado!.isNotEmpty)
+                            ? _torneoSeleccionado!
+                            : widget.nombreTorneoActual;
+
                         await FirebaseFirestore.instance.collection('historial_partidos').add({
-                          'torneo': widget.nombreTorneoActual,
+                          'torneo': torneoGuardar,
                           'fecha': fechaCtrl.text.trim(),
                           'equipoA_nombre': nombreEquipoACtrl.text.trim(),
                           'equipoB_nombre': nombreEquipoBCtrl.text.trim(),
@@ -471,7 +524,39 @@ class _TablaScreenState extends State<TablaScreen> {
     );
   }
 
-  Widget _buildVistaEstadisticas(List<QueryDocumentSnapshot<Object?>> docs) {
+  void _abrirProgresoJugador(
+    String nombreJugador,
+    String tituloContextoActual,
+    List<QueryDocumentSnapshot<Object?>> docsVistaActual,
+    List<QueryDocumentSnapshot<Object?>> docsTodosLosTorneos, {
+    bool hayVariosTorneos = true,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: const Color(0xFF142030),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => _ProgresoJugadorSheet(
+        nombreJugador: nombreJugador,
+        tituloVistaActual: tituloContextoActual,
+        docsVistaActual: docsVistaActual,
+        docsTodosLosTorneos: docsTodosLosTorneos,
+        titulares: widget.titulares,
+        suplentes: widget.suplentes,
+        hayVariosTorneos: hayVariosTorneos,
+      ),
+    );
+  }
+
+  Widget _buildVistaEstadisticas(
+    List<QueryDocumentSnapshot<Object?>> docs, {
+    required int alcanceEfectivo,
+    required String torneoRef,
+    required int anioFiltro,
+  }) {
     if (docs.isEmpty) {
       return Card(
         color: Colors.white.withValues(alpha: 0.03),
@@ -815,35 +900,140 @@ class _TablaScreenState extends State<TablaScreen> {
               : 'Se necesitan partidos perdidos para calcular',
           subdetalle: mufaSubdetalle,
         ),
+        StreamBuilder<QuerySnapshot>(
+          stream: _streamVotosFigura,
+          builder: (context, snapVotos) {
+            final allVotosDocs = snapVotos.data?.docs ?? [];
+            final filteredVotosDocs = allVotosDocs.where((vDoc) {
+              final vData = vDoc.data() as Map<String, dynamic>;
+              if (alcanceEfectivo == 2) return true;
+              if (alcanceEfectivo == 1) {
+                return _extraerAnioDeDocumento(vData) == anioFiltro;
+              }
+              final t = (vData['torneo'] ?? '').toString().trim();
+              if (t.isNotEmpty) {
+                return t == torneoRef.trim();
+              }
+              return torneoRef.trim() == widget.nombreTorneoActual.trim();
+            }).toList();
+
+            final Map<String, int> puntosMvp = {};
+            final Map<String, int> fechasVotado = {};
+
+            for (final vDoc in filteredVotosDocs) {
+              final vData = vDoc.data() as Map<String, dynamic>;
+              final votosMap =
+                  (vData['votos'] as Map<String, dynamic>?) ?? {};
+              final Set<String> votadosEnEstaFecha = {};
+
+              for (final entryVotante in votosMap.entries) {
+                if (entryVotante.value is! Map) continue;
+                final repartos =
+                    Map<String, dynamic>.from(entryVotante.value as Map);
+                for (final votoEntry in repartos.entries) {
+                  final jug = canonicalizar(votoEntry.key.toString());
+                  final int pts = votoEntry.value is int
+                      ? votoEntry.value as int
+                      : int.tryParse('${votoEntry.value}') ?? 0;
+                  if (jug.isNotEmpty && pts > 0) {
+                    puntosMvp[jug] = (puntosMvp[jug] ?? 0) + pts;
+                    votadosEnEstaFecha.add(jug);
+                  }
+                }
+              }
+
+              for (final jug in votadosEnEstaFecha) {
+                fechasVotado[jug] = (fechasVotado[jug] ?? 0) + 1;
+              }
+            }
+
+            final rankingMvp = puntosMvp.entries.toList()
+              ..sort((a, b) {
+                final cmpPts = b.value.compareTo(a.value);
+                if (cmpPts != 0) return cmpPts;
+                return (fechasVotado[b.key] ?? 0)
+                    .compareTo(fechasVotado[a.key] ?? 0);
+              });
+
+            final String tituloMvp = alcanceEfectivo == 2
+                ? 'El MvP histórico'
+                : (alcanceEfectivo == 1
+                    ? 'El MvP del año'
+                    : 'El MvP del torneo');
+
+            if (rankingMvp.isEmpty) {
+              return buildStatCard(
+                icon: Icons.emoji_events_rounded,
+                iconColor: Colors.cyanAccent,
+                titulo: tituloMvp,
+                nombrePrincipal: 'Sin votos registrados',
+                detalle: 'Votá la figura en El Vestuario para sumar puntos',
+              );
+            }
+
+            final int maxPtsMvp = rankingMvp.first.value;
+            final lideres = rankingMvp
+                .where((e) => e.value == maxPtsMvp)
+                .map((e) => e.key)
+                .toList();
+
+            final String nombreMvp = lideres.join(' & ');
+            final String detalleMvp = lideres.length > 1
+                ? '$maxPtsMvp ${maxPtsMvp == 1 ? 'punto' : 'puntos'} c/u (empate)'
+                : '$maxPtsMvp ${maxPtsMvp == 1 ? 'punto recibido' : 'puntos recibidos'}';
+
+            final List<String> notasMvp = [];
+            if (lideres.length == 1) {
+              final int fCount = fechasVotado[lideres.first] ?? 1;
+              notasMvp.add(
+                  'Votado en $fCount ${fCount == 1 ? 'fecha' : 'fechas'}');
+            }
+            final segundo =
+                rankingMvp.where((e) => e.value < maxPtsMvp).firstOrNull;
+            if (segundo != null) {
+              notasMvp.add('2°: ${segundo.key} (${segundo.value} pts)');
+            }
+
+            return buildStatCard(
+              icon: Icons.emoji_events_rounded,
+              iconColor: Colors.cyanAccent,
+              titulo: tituloMvp,
+              nombrePrincipal: nombreMvp,
+              detalle: detalleMvp,
+              subdetalle: notasMvp.isNotEmpty ? notasMvp.join(' • ') : null,
+            );
+          },
+        ),
       ],
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final String torneoRef =
-        (_torneoSeleccionado != null && widget.historialTorneos.contains(_torneoSeleccionado))
-            ? _torneoSeleccionado!
-            : widget.nombreTorneoActual;
-    final int anioFiltro = _extraerAnioDeTorneo(torneoRef);
-
     return StreamBuilder<QuerySnapshot>(
       stream: _streamHistorial,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            !snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
 
-        List<QueryDocumentSnapshot<Object?>> docs = snapshot.data?.docs.toList() ?? [];
+        final List<QueryDocumentSnapshot<Object?>> todosDocs =
+            snapshot.data?.docs.toList() ?? [];
 
-        if (_modoAnual) {
-          docs = docs.where((d) {
-            final data = d.data() as Map<String, dynamic>;
-            return _extraerAnioDeDocumento(data) == anioFiltro;
-          }).toList();
-        }
+        final torneosDeDocs = todosDocs
+            .map((d) => ((d.data() as Map<String, dynamic>)['torneo'] ?? '').toString().trim())
+            .where((t) => t.isNotEmpty);
+        final torneosLista = _obtenerTorneosOrdenados(torneosDeDocs);
+        final bool hayVariosTorneos = torneosLista.length > 1;
+        final int alcanceEfectivo = hayVariosTorneos ? _alcanceFiltro : 0;
+        final String torneoRef =
+            (_torneoSeleccionado != null && torneosLista.contains(_torneoSeleccionado))
+                ? _torneoSeleccionado!
+                : (torneosLista.isNotEmpty ? torneosLista.first : widget.nombreTorneoActual);
+        final int anioFiltro = _extraerAnioDeTorneo(torneoRef);
 
-        docs.sort((a, b) {
+        todosDocs.sort((a, b) {
           final aData = a.data() as Map<String, dynamic>;
           final bData = b.data() as Map<String, dynamic>;
           final Timestamp? tA = aData['creadoEn'] as Timestamp?;
@@ -853,6 +1043,22 @@ class _TablaScreenState extends State<TablaScreen> {
           if (tB == null) return -1;
           return tB.compareTo(tA);
         });
+
+        List<QueryDocumentSnapshot<Object?>> docs;
+        if (alcanceEfectivo == 2) {
+          docs = todosDocs;
+        } else if (alcanceEfectivo == 1) {
+          docs = todosDocs.where((d) {
+            final data = d.data() as Map<String, dynamic>;
+            return _extraerAnioDeDocumento(data) == anioFiltro;
+          }).toList();
+        } else {
+          docs = todosDocs.where((d) {
+            final data = d.data() as Map<String, dynamic>;
+            final t = (data['torneo'] ?? '').toString().trim();
+            return t == torneoRef.trim();
+          }).toList();
+        }
 
         final Map<String, Map<String, dynamic>> stats = {};
 
@@ -932,144 +1138,219 @@ class _TablaScreenState extends State<TablaScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Row(
-                  children: [
-                    if (widget.historialTorneos.length > 1)
-                      Expanded(
+                if (hayVariosTorneos) ...[
+                  Builder(
+                    builder: (btnContext) {
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: alcanceEfectivo == 2
+                            ? null
+                            : () async {
+                                final RenderBox box =
+                                    btnContext.findRenderObject() as RenderBox;
+                                final RenderBox overlay = Overlay.of(btnContext)
+                                    .context
+                                    .findRenderObject() as RenderBox;
+                                final Offset topLeft = box.localToGlobal(
+                                    Offset.zero,
+                                    ancestor: overlay);
+                                final Offset bottomRight = box.localToGlobal(
+                                    box.size.bottomRight(Offset.zero),
+                                    ancestor: overlay);
+                                final RelativeRect position =
+                                    RelativeRect.fromRect(
+                                  Rect.fromPoints(topLeft, bottomRight),
+                                  Offset.zero & overlay.size,
+                                );
+
+                                final String? selected = await showMenu<String>(
+                                  context: btnContext,
+                                  position: position,
+                                  color: const Color(0xFF16253B),
+                                  menuPadding:
+                                      const EdgeInsets.symmetric(vertical: 4),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    side: const BorderSide(
+                                        color: Colors.white12),
+                                  ),
+                                  constraints: BoxConstraints(
+                                    minWidth: box.size.width,
+                                    maxWidth: box.size.width,
+                                  ),
+                                  items: torneosLista.map((String torneo) {
+                                    final bool esActualSel =
+                                        torneo == torneoRef;
+                                    return PopupMenuItem<String>(
+                                      value: torneo,
+                                      height: 34,
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 14),
+                                      child: Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              torneo,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                fontWeight: esActualSel
+                                                    ? FontWeight.bold
+                                                    : FontWeight.w500,
+                                                fontSize: 13,
+                                                color: esActualSel
+                                                    ? Colors.lightBlueAccent
+                                                    : Colors.white,
+                                              ),
+                                            ),
+                                          ),
+                                          if (esActualSel)
+                                            const Icon(
+                                              Icons.check,
+                                              size: 16,
+                                              color: Colors.lightBlueAccent,
+                                            ),
+                                        ],
+                                      ),
+                                    );
+                                  }).toList(),
+                                );
+
+                                if (selected != null &&
+                                    selected != _torneoSeleccionado) {
+                                  setState(() {
+                                    _torneoSeleccionado = selected;
+                                  });
+                                }
+                              },
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+                          height: 36,
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: _modoAnual ? 0.02 : 0.05),
+                            color: Colors.white.withValues(
+                                alpha: alcanceEfectivo == 2 ? 0.02 : 0.05),
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
-                              color: _modoAnual
+                              color: alcanceEfectivo == 2
                                   ? Colors.white12
-                                  : Colors.lightBlueAccent.withValues(alpha: 0.3),
+                                  : (alcanceEfectivo == 1
+                                      ? Colors.tealAccent
+                                          .withValues(alpha: 0.35)
+                                      : Colors.lightBlueAccent
+                                          .withValues(alpha: 0.3)),
                             ),
                           ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<String>(
-                              value: _torneoSeleccionado != null &&
-                                      widget.historialTorneos.contains(_torneoSeleccionado)
-                                  ? _torneoSeleccionado
-                                  : widget.historialTorneos.first,
-                              isExpanded: true,
-                              dropdownColor: const Color(0xFF16253B),
-                              icon: Icon(
-                                Icons.keyboard_arrow_down,
-                                color: _modoAnual ? Colors.grey : Colors.lightBlueAccent,
-                              ),
-                              items: widget.historialTorneos.map((String torneo) {
-                                return DropdownMenuItem<String>(
-                                  value: torneo,
-                                  child: Text(
-                                    _modoAnual ? 'Torneos $anioFiltro' : torneo,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 13,
-                                      color: _modoAnual ? Colors.grey : Colors.white,
-                                    ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  alcanceEfectivo == 2
+                                      ? 'Histórico Completo'
+                                      : (alcanceEfectivo == 1
+                                          ? 'Torneos $anioFiltro'
+                                          : torneoRef),
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                    color: alcanceEfectivo == 2
+                                        ? Colors.grey
+                                        : (alcanceEfectivo == 1
+                                            ? Colors.tealAccent
+                                            : Colors.white),
                                   ),
-                                );
-                              }).toList(),
-                              onChanged: _modoAnual
-                                  ? null
-                                  : (String? newValue) {
-                                      if (newValue != null && newValue != _torneoSeleccionado) {
-                                        setState(() {
-                                          _torneoSeleccionado = newValue;
-                                          _actualizarStream();
-                                        });
-                                      }
-                                    },
-                            ),
+                                ),
+                              ),
+                              Icon(
+                                Icons.keyboard_arrow_down,
+                                size: 20,
+                                color: alcanceEfectivo == 2
+                                    ? Colors.grey
+                                    : (alcanceEfectivo == 1
+                                        ? Colors.tealAccent
+                                        : Colors.lightBlueAccent),
+                              ),
+                            ],
                           ),
                         ),
-                      )
-                    else
-                      Expanded(
-                        child: Text(
-                          _modoAnual ? 'Tabla Anual $anioFiltro' : torneoRef,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                            color: Colors.lightBlueAccent,
-                          ),
-                        ),
-                      ),
-                    const SizedBox(width: 8),
-                    InkWell(
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () {
-                        setState(() {
-                          _modoAnual = !_modoAnual;
-                          _actualizarStream();
-                        });
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: _modoAnual
-                              ? Colors.tealAccent.withValues(alpha: 0.18)
-                              : Colors.white.withValues(alpha: 0.05),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: _modoAnual ? Colors.tealAccent : Colors.white12,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              _modoAnual ? Icons.check_box : Icons.check_box_outline_blank,
-                              size: 18,
-                              color: _modoAnual ? Colors.tealAccent : Colors.grey,
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Anual',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: _modoAnual ? Colors.tealAccent : Colors.white70,
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.white12),
+                    ),
+                    child: Row(
+                      children: [
+                        {'id': 0, 'label': 'Actual', 'color': Colors.lightBlueAccent},
+                        {'id': 1, 'label': 'Anual ($anioFiltro)', 'color': Colors.tealAccent},
+                        {'id': 2, 'label': 'Histórico', 'color': Colors.amberAccent},
+                      ].map((opt) {
+                        final int id = opt['id'] as int;
+                        final Color activeColor = opt['color'] as Color;
+                        final bool seleccionado = alcanceEfectivo == id;
+                        return Expanded(
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(11),
+                            onTap: () => setState(() => _alcanceFiltro = id),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
+                              decoration: BoxDecoration(
+                                color: seleccionado
+                                    ? activeColor.withValues(alpha: 0.22)
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(11),
+                              ),
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  opt['label'] as String,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: seleccionado ? FontWeight.bold : FontWeight.normal,
+                                    color: seleccionado ? activeColor : Colors.grey,
+                                  ),
+                                ),
                               ),
                             ),
-                          ],
-                        ),
-                      ),
+                          ),
+                        );
+                      }).toList(),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 14),
+                  ),
+                  const SizedBox(height: 10),
+                ],
 
                 Container(
-                  padding: const EdgeInsets.all(4),
+                  padding: const EdgeInsets.all(3),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: Colors.white12),
                   ),
                   child: Row(
                     children: [
                       {'id': 0, 'label': 'Posiciones', 'icon': Icons.format_list_numbered, 'flex': 11},
-                      {'id': 1, 'label': 'Partidos', 'icon': Icons.history, 'flex': 10},
-                      {'id': 2, 'label': 'Estadísticas', 'icon': Icons.query_stats, 'flex': 14},
+                      {'id': 1, 'label': 'Partidos (${docs.length})', 'icon': Icons.history, 'flex': 12},
+                      {'id': 2, 'label': 'Estadísticas', 'icon': Icons.query_stats, 'flex': 13},
                     ].map((tab) {
                       final int id = tab['id'] as int;
                       final bool seleccionado = _vistaSeleccionada == id;
                       return Expanded(
                         flex: tab['flex'] as int,
                         child: InkWell(
-                          borderRadius: BorderRadius.circular(16),
+                          borderRadius: BorderRadius.circular(11),
                           onTap: () => setState(() => _vistaSeleccionada = id),
                           child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                            padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 4),
                             decoration: BoxDecoration(
                               color: seleccionado
-                                  ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.3)
+                                  ? Colors.lightBlueAccent.withValues(alpha: 0.22)
                                   : Colors.transparent,
-                              borderRadius: BorderRadius.circular(16),
+                              borderRadius: BorderRadius.circular(11),
                             ),
                             child: FittedBox(
                               fit: BoxFit.scaleDown,
@@ -1099,7 +1380,7 @@ class _TablaScreenState extends State<TablaScreen> {
                     }).toList(),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 10),
 
                 if (_vistaSeleccionada == 0) ...[
                   if (listaRanking.isEmpty)
@@ -1208,6 +1489,7 @@ class _TablaScreenState extends State<TablaScreen> {
                     const SizedBox(height: 6),
                     ListView.builder(
                       shrinkWrap: true,
+                      padding: EdgeInsets.zero,
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: listaRanking.length,
                       itemBuilder: (context, index) {
@@ -1234,86 +1516,96 @@ class _TablaScreenState extends State<TablaScreen> {
                                 ? BorderSide(color: Theme.of(context).colorScheme.primary)
                                 : BorderSide.none,
                           ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            child: Row(
-                              children: [
-                                SizedBox(
-                                  width: 24,
-                                  child: Text(
-                                    '${index + 1}',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: colorNumero,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(8),
+                            onTap: () => _abrirProgresoJugador(
+                              nombre,
+                              alcanceEfectivo == 2 ? 'Histórico Completo' : (alcanceEfectivo == 1 ? 'Tabla Anual $anioFiltro' : torneoRef),
+                              docs,
+                              todosDocs,
+                              hayVariosTorneos: hayVariosTorneos,
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 24,
+                                    child: Text(
+                                      '${index + 1}',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: colorNumero,
+                                      ),
                                     ),
                                   ),
-                                ),
-                                Expanded(
-                                  child: Text(
-                                    nombre,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontWeight: esYo ? FontWeight.bold : FontWeight.normal,
+                                  Expanded(
+                                    child: Text(
+                                      nombre,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontWeight: esYo ? FontWeight.bold : FontWeight.normal,
+                                      ),
                                     ),
                                   ),
-                                ),
-                                SizedBox(
-                                  width: 28,
-                                  child: Text(
-                                    '$pj',
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(fontSize: 13),
-                                  ),
-                                ),
-                                SizedBox(
-                                  width: 28,
-                                  child: Text(
-                                    '${data['pg']}',
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(fontSize: 13, color: Colors.tealAccent),
-                                  ),
-                                ),
-                                SizedBox(
-                                  width: 28,
-                                  child: Text(
-                                    '${data['pe']}',
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(fontSize: 13, color: Colors.grey),
-                                  ),
-                                ),
-                                SizedBox(
-                                  width: 28,
-                                  child: Text(
-                                    '${data['pp']}',
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(fontSize: 13, color: Colors.redAccent),
-                                  ),
-                                ),
-                                SizedBox(
-                                  width: 36,
-                                  child: Text(
-                                    '${data['pts']}',
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.lightBlueAccent,
+                                  SizedBox(
+                                    width: 28,
+                                    child: Text(
+                                      '$pj',
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(fontSize: 13),
                                     ),
                                   ),
-                                ),
-                                SizedBox(
-                                  width: 40,
-                                  child: Text(
-                                    promedioTexto,
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.tealAccent,
+                                  SizedBox(
+                                    width: 28,
+                                    child: Text(
+                                      '${data['pg']}',
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(fontSize: 13, color: Colors.tealAccent),
                                     ),
                                   ),
-                                ),
-                              ],
+                                  SizedBox(
+                                    width: 28,
+                                    child: Text(
+                                      '${data['pe']}',
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(fontSize: 13, color: Colors.grey),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: 28,
+                                    child: Text(
+                                      '${data['pp']}',
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(fontSize: 13, color: Colors.redAccent),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: 36,
+                                    child: Text(
+                                      '${data['pts']}',
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.lightBlueAccent,
+                                      ),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: 40,
+                                    child: Text(
+                                      promedioTexto,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.tealAccent,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         );
@@ -1328,9 +1620,9 @@ class _TablaScreenState extends State<TablaScreen> {
                       padding: const EdgeInsets.all(24.0),
                       child: Center(
                         child: Text(
-                          _modoAnual
-                              ? 'No hay partidos registrados en $anioFiltro.'
-                              : 'No hay partidos en este torneo.',
+                          alcanceEfectivo == 2
+                              ? 'No hay partidos registrados.'
+                              : (alcanceEfectivo == 1 ? 'No hay partidos registrados en $anioFiltro.' : 'No hay partidos en este torneo.'),
                           style: const TextStyle(color: Colors.grey),
                         ),
                       ),
@@ -1338,6 +1630,7 @@ class _TablaScreenState extends State<TablaScreen> {
                   else
                     ListView.builder(
                       shrinkWrap: true,
+                      padding: EdgeInsets.zero,
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: docs.length,
                       itemBuilder: (context, index) {
@@ -1369,7 +1662,7 @@ class _TablaScreenState extends State<TablaScreen> {
                                         children: [
                                           Flexible(
                                             child: Text(
-                                              _modoAnual && torneoDoc.isNotEmpty
+                                              alcanceEfectivo != 0 && torneoDoc.isNotEmpty
                                                   ? '$fecha • $torneoDoc'
                                                   : fecha,
                                               overflow: TextOverflow.ellipsis,
@@ -1526,7 +1819,12 @@ class _TablaScreenState extends State<TablaScreen> {
                 ],
 
                 if (_vistaSeleccionada == 2) ...[
-                  _buildVistaEstadisticas(docs),
+                  _buildVistaEstadisticas(
+                    docs,
+                    alcanceEfectivo: alcanceEfectivo,
+                    torneoRef: torneoRef,
+                    anioFiltro: anioFiltro,
+                  ),
                 ],
 
                 if (_vistaSeleccionada == 1 && widget.puedeCargarResultado)
@@ -1549,5 +1847,796 @@ class _TablaScreenState extends State<TablaScreen> {
         );
       },
     );
+  }
+}
+
+class _PuntoProgreso {
+  final int fechaNum;
+  final String fechaTexto;
+  final String torneo;
+  final int posicion;
+  final int totalJugadores;
+  final int puntos;
+  final int deltaPosicion;
+  final bool jugoEstaFecha;
+  final String resultadoTexto;
+  final String marcadorTexto;
+
+  _PuntoProgreso({
+    required this.fechaNum,
+    required this.fechaTexto,
+    required this.torneo,
+    required this.posicion,
+    required this.totalJugadores,
+    required this.puntos,
+    required this.deltaPosicion,
+    required this.jugoEstaFecha,
+    required this.resultadoTexto,
+    required this.marcadorTexto,
+  });
+}
+
+class _StatsAcumuladas {
+  int pj = 0;
+  int pts = 0;
+  double get promedio => pj > 0 ? pts / pj : 0.0;
+}
+
+class _ProgresoJugadorSheet extends StatefulWidget {
+  final String nombreJugador;
+  final String tituloVistaActual;
+  final List<QueryDocumentSnapshot<Object?>> docsVistaActual;
+  final List<QueryDocumentSnapshot<Object?>> docsTodosLosTorneos;
+  final List<Jugador> titulares;
+  final List<Jugador> suplentes;
+  final bool hayVariosTorneos;
+
+  const _ProgresoJugadorSheet({
+    required this.nombreJugador,
+    required this.tituloVistaActual,
+    required this.docsVistaActual,
+    required this.docsTodosLosTorneos,
+    required this.titulares,
+    required this.suplentes,
+    this.hayVariosTorneos = true,
+  });
+
+  @override
+  State<_ProgresoJugadorSheet> createState() => _ProgresoJugadorSheetState();
+}
+
+class _ProgresoJugadorSheetState extends State<_ProgresoJugadorSheet> {
+  bool _verHistorico = false;
+  bool _verPuntos = false;
+
+  String _canonicalizar(String raw) {
+    final l = limpiarNombre(raw);
+    final base = l.isNotEmpty ? l : raw.trim();
+    for (final t in [...widget.titulares, ...widget.suplentes]) {
+      if (sonElMismoJugador(t.nombre, base)) {
+        return t.nombre;
+      }
+    }
+    return base;
+  }
+
+  List<_PuntoProgreso> _calcularSerie(
+    List<QueryDocumentSnapshot<Object?>> docsDesc,
+  ) {
+    final cronologicos = docsDesc.reversed.toList();
+    final Map<String, _StatsAcumuladas> tablaTemp = {};
+    final List<_PuntoProgreso> puntos = [];
+    int? posAnterior;
+
+    for (int i = 0; i < cronologicos.length; i++) {
+      final data = cronologicos[i].data() as Map<String, dynamic>;
+      final int golesA = data['equipoA_goles'] ?? 0;
+      final int golesB = data['equipoB_goles'] ?? 0;
+      final List rawA = data['equipoA_jugadores'] ?? [];
+      final List rawB = data['equipoB_jugadores'] ?? [];
+      final String torneo = (data['torneo'] ?? '').toString();
+      final String fechaStr = (data['fecha'] ?? 'Fecha ${i + 1}').toString();
+
+      bool jugo = false;
+      String resTexto = '-';
+      String marcador = 'No jugó esta fecha';
+
+      for (final j in rawA) {
+        final nom = _canonicalizar(j.toString());
+        if (nom.isEmpty) continue;
+        final st = tablaTemp.putIfAbsent(nom, () => _StatsAcumuladas());
+        st.pj += 1;
+        if (golesA > golesB) {
+          st.pts += 3;
+        } else if (golesA == golesB) {
+          st.pts += 1;
+        }
+        if (sonElMismoJugador(nom, widget.nombreJugador)) {
+          jugo = true;
+          resTexto = golesA > golesB ? 'G' : (golesA == golesB ? 'E' : 'P');
+          marcador = golesA > golesB
+              ? 'Ganó $golesA - $golesB ($fechaStr)'
+              : (golesA == golesB
+                  ? 'Empató $golesA - $golesB ($fechaStr)'
+                  : 'Perdió $golesA - $golesB ($fechaStr)');
+        }
+      }
+
+      for (final j in rawB) {
+        final nom = _canonicalizar(j.toString());
+        if (nom.isEmpty) continue;
+        final st = tablaTemp.putIfAbsent(nom, () => _StatsAcumuladas());
+        st.pj += 1;
+        if (golesB > golesA) {
+          st.pts += 3;
+        } else if (golesB == golesA) {
+          st.pts += 1;
+        }
+        if (sonElMismoJugador(nom, widget.nombreJugador)) {
+          jugo = true;
+          resTexto = golesB > golesA ? 'G' : (golesB == golesA ? 'E' : 'P');
+          marcador = golesB > golesA
+              ? 'Ganó $golesB - $golesA ($fechaStr)'
+              : (golesB == golesA
+                  ? 'Empató $golesB - $golesA ($fechaStr)'
+                  : 'Perdió $golesB - $golesA ($fechaStr)');
+        }
+      }
+
+      final ranking = tablaTemp.entries.toList()
+        ..sort((a, b) {
+          final int cmpPts = b.value.pts.compareTo(a.value.pts);
+          if (cmpPts != 0) return cmpPts;
+          final int cmpProm = b.value.promedio.compareTo(a.value.promedio);
+          if (cmpProm != 0) return cmpProm;
+          return a.value.pj.compareTo(b.value.pj);
+        });
+
+      final idxJugador = ranking
+          .indexWhere((e) => sonElMismoJugador(e.key, widget.nombreJugador));
+
+      if (idxJugador != -1) {
+        final int posActual = idxJugador + 1;
+        final int ptsActual = ranking[idxJugador].value.pts;
+        final int delta = posAnterior != null ? (posAnterior - posActual) : 0;
+        posAnterior = posActual;
+
+        puntos.add(_PuntoProgreso(
+          fechaNum: i + 1,
+          fechaTexto: fechaStr,
+          torneo: torneo,
+          posicion: posActual,
+          totalJugadores: ranking.length,
+          puntos: ptsActual,
+          deltaPosicion: delta,
+          jugoEstaFecha: jugo,
+          resultadoTexto: resTexto,
+          marcadorTexto: marcador,
+        ));
+      }
+    }
+
+    return puntos;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final docsBase =
+        _verHistorico ? widget.docsTodosLosTorneos : widget.docsVistaActual;
+    final serie = _calcularSerie(docsBase);
+
+    final int maxRank = serie.isEmpty
+        ? 10
+        : serie
+            .map((p) => p.totalJugadores)
+            .reduce((a, b) => a > b ? a : b);
+
+    final int puestoActual = serie.isNotEmpty ? serie.last.posicion : 0;
+    final int mejorPuesto = serie.isNotEmpty
+        ? serie.map((p) => p.posicion).reduce((a, b) => a < b ? a : b)
+        : 0;
+    final int puntosFinal = serie.isNotEmpty ? serie.last.puntos : 0;
+    final int variacionTotal =
+        serie.length >= 2 ? (serie.first.posicion - serie.last.posicion) : 0;
+
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.85,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+            child: Row(
+              children: [
+                const CircleAvatar(
+                  radius: 18,
+                  backgroundColor: Colors.lightBlueAccent,
+                  child: Icon(Icons.show_chart, color: Colors.black, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Progreso de ${widget.nombreJugador}',
+                        style: const TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        _verHistorico
+                            ? 'Todos los torneos del grupo'
+                            : widget.tituloVistaActual,
+                        style:
+                            const TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                if (widget.hayVariosTorneos) ...[
+                  Expanded(
+                    flex: 11,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.white12),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(11),
+                              onTap: () => setState(() => _verHistorico = false),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    vertical: 7, horizontal: 4),
+                                decoration: BoxDecoration(
+                                  color: !_verHistorico
+                                      ? Colors.lightBlueAccent
+                                          .withValues(alpha: 0.25)
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(11),
+                                ),
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    'Torneo',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: !_verHistorico
+                                          ? FontWeight.bold
+                                          : FontWeight.normal,
+                                      color: !_verHistorico
+                                          ? Colors.lightBlueAccent
+                                          : Colors.grey,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(11),
+                              onTap: () => setState(() => _verHistorico = true),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    vertical: 7, horizontal: 4),
+                                decoration: BoxDecoration(
+                                  color: _verHistorico
+                                      ? Colors.amberAccent.withValues(alpha: 0.25)
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(11),
+                                ),
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    'Histórico',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: _verHistorico
+                                          ? FontWeight.bold
+                                          : FontWeight.normal,
+                                      color: _verHistorico
+                                          ? Colors.amberAccent
+                                          : Colors.grey,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                Expanded(
+                  flex: 10,
+                  child: Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.white12),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(11),
+                            onTap: () => setState(() => _verPuntos = false),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 7, horizontal: 4),
+                              decoration: BoxDecoration(
+                                color: !_verPuntos
+                                    ? Colors.lightBlueAccent
+                                        .withValues(alpha: 0.25)
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(11),
+                              ),
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  'Puesto #',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: !_verPuntos
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                    color: !_verPuntos
+                                        ? Colors.white
+                                        : Colors.grey,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(11),
+                            onTap: () => setState(() => _verPuntos = true),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 7, horizontal: 4),
+                              decoration: BoxDecoration(
+                                color: _verPuntos
+                                    ? Colors.greenAccent.withValues(alpha: 0.25)
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(11),
+                              ),
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  'Puntos',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: _verPuntos
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                    color: _verPuntos
+                                        ? Colors.greenAccent
+                                        : Colors.grey,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          if (serie.isEmpty)
+            const Expanded(
+              child: Center(
+                child: Text(
+                  'Sin partidos registrados para graficar.',
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ),
+            )
+          else ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  _buildKpiCard(
+                      'Actual', '#$puestoActual', Colors.lightBlueAccent),
+                  const SizedBox(width: 8),
+                  _buildKpiCard(
+                      'Mejor', '#$mejorPuesto', Colors.amberAccent),
+                  const SizedBox(width: 8),
+                  _buildKpiCard('Puntos', '$puntosFinal', Colors.greenAccent),
+                  const SizedBox(width: 8),
+                  _buildKpiCard(
+                    'Balance',
+                    variacionTotal > 0
+                        ? '▲ +$variacionTotal'
+                        : (variacionTotal < 0 ? '▼ $variacionTotal' : '='),
+                    variacionTotal > 0
+                        ? Colors.greenAccent
+                        : (variacionTotal < 0
+                            ? Colors.redAccent
+                            : Colors.white70),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              height: 210,
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.fromLTRB(10, 14, 10, 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0E1724),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                    color: Colors.lightBlueAccent.withValues(alpha: 0.2)),
+              ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final double minWidth = constraints.maxWidth;
+                  final double chartWidth =
+                      (serie.length * 52.0).clamp(minWidth, 4000.0);
+                  return SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(
+                      width: chartWidth,
+                      height: 185,
+                      child: CustomPaint(
+                        painter: _GraficoProgresoPainter(
+                          puntos: serie,
+                          maxRank: maxRank,
+                          modoPuntos: _verPuntos,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'Detalle fecha por fecha',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white70),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+                itemCount: serie.length,
+                itemBuilder: (context, idx) {
+                  final item = serie[serie.length - 1 - idx];
+                  final Color colorRes = item.resultadoTexto == 'G'
+                      ? Colors.greenAccent
+                      : (item.resultadoTexto == 'E'
+                          ? Colors.amberAccent
+                          : (item.resultadoTexto == 'P'
+                              ? Colors.redAccent
+                              : Colors.grey));
+
+                  return Card(
+                    margin: const EdgeInsets.symmetric(vertical: 3),
+                    color: Colors.white.withValues(alpha: 0.03),
+                    child: ListTile(
+                      dense: true,
+                      leading: CircleAvatar(
+                        radius: 14,
+                        backgroundColor: colorRes.withValues(alpha: 0.18),
+                        child: Text(
+                          item.resultadoTexto,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: colorRes,
+                          ),
+                        ),
+                      ),
+                      title: Row(
+                        children: [
+                          Text(
+                            'Fecha ${item.fechaNum}',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          if (_verHistorico && item.torneo.isNotEmpty) ...[
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                '(${item.torneo})',
+                                style: const TextStyle(
+                                    fontSize: 11, color: Colors.grey),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      subtitle: Text(
+                        item.marcadorTexto,
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: item.jugoEstaFecha
+                                ? Colors.white70
+                                : Colors.grey),
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (item.deltaPosicion != 0)
+                            Container(
+                              margin: const EdgeInsets.only(right: 8),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: (item.deltaPosicion > 0
+                                        ? Colors.greenAccent
+                                        : Colors.redAccent)
+                                    .withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                item.deltaPosicion > 0
+                                    ? '▲ +${item.deltaPosicion}'
+                                    : '▼ ${item.deltaPosicion}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: item.deltaPosicion > 0
+                                      ? Colors.greenAccent
+                                      : Colors.redAccent,
+                                ),
+                              ),
+                            ),
+                          Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                '#${item.posicion}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                  color: Colors.lightBlueAccent,
+                                ),
+                              ),
+                              Text(
+                                '${item.puntos} pts',
+                                style: const TextStyle(
+                                    fontSize: 10, color: Colors.greenAccent),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildKpiCard(String label, String value, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.04),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Column(
+          children: [
+            Text(label,
+                style: const TextStyle(fontSize: 10, color: Colors.grey)),
+            const SizedBox(height: 2),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GraficoProgresoPainter extends CustomPainter {
+  final List<_PuntoProgreso> puntos;
+  final int maxRank;
+  final bool modoPuntos;
+
+  _GraficoProgresoPainter({
+    required this.puntos,
+    required this.maxRank,
+    required this.modoPuntos,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (puntos.isEmpty) return;
+
+    const double padLeft = 34.0;
+    const double padRight = 22.0;
+    const double padTop = 22.0;
+    const double padBottom = 24.0;
+
+    final double plotW = (size.width - padLeft - padRight).clamp(10.0, 99999.0);
+    final double plotH = (size.height - padTop - padBottom).clamp(10.0, 99999.0);
+
+    final int maxPts = puntos
+        .map((p) => p.puntos)
+        .reduce((a, b) => a > b ? a : b)
+        .clamp(3, 9999);
+
+    double yParaPunto(_PuntoProgreso p) {
+      if (modoPuntos) {
+        final ratio = (p.puntos / maxPts).clamp(0.0, 1.0);
+        return padTop + plotH * (1.0 - ratio);
+      } else {
+        if (maxRank <= 1) return padTop + plotH / 2;
+        final ratio = ((p.posicion - 1) / (maxRank - 1)).clamp(0.0, 1.0);
+        return padTop + plotH * ratio;
+      }
+    }
+
+    double xParaIndice(int i) {
+      if (puntos.length == 1) return padLeft + plotW / 2;
+      return padLeft + (plotW * i / (puntos.length - 1));
+    }
+
+    final gridPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.08)
+      ..strokeWidth = 1;
+
+    final List<double> gridRatios = [0.0, 0.5, 1.0];
+    for (final r in gridRatios) {
+      final y = padTop + plotH * r;
+      canvas.drawLine(Offset(padLeft, y), Offset(padLeft + plotW, y), gridPaint);
+
+      final String labelY;
+      if (modoPuntos) {
+        final val = ((1.0 - r) * maxPts).round();
+        labelY = '$val';
+      } else {
+        final rankVal = (1 + r * (maxRank - 1)).round();
+        labelY = '#$rankVal';
+      }
+
+      final tp = TextPainter(
+        text: TextSpan(
+          text: labelY,
+          style: const TextStyle(color: Colors.grey, fontSize: 10),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset(2, y - tp.height / 2));
+    }
+
+    final List<Offset> coords = [];
+    for (int i = 0; i < puntos.length; i++) {
+      coords.add(Offset(xParaIndice(i), yParaPunto(puntos[i])));
+    }
+
+    final Color lineColor =
+        modoPuntos ? Colors.greenAccent : Colors.lightBlueAccent;
+
+    if (coords.length >= 2) {
+      final areaPath = Path()..moveTo(coords.first.dx, padTop + plotH);
+      for (final c in coords) {
+        areaPath.lineTo(c.dx, c.dy);
+      }
+      areaPath.lineTo(coords.last.dx, padTop + plotH);
+      areaPath.close();
+
+      final areaPaint = Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            lineColor.withValues(alpha: 0.28),
+            lineColor.withValues(alpha: 0.0),
+          ],
+        ).createShader(Rect.fromLTWH(padLeft, padTop, plotW, plotH));
+      canvas.drawPath(areaPath, areaPaint);
+
+      final linePath = Path()..moveTo(coords.first.dx, coords.first.dy);
+      for (int i = 1; i < coords.length; i++) {
+        linePath.lineTo(coords[i].dx, coords[i].dy);
+      }
+      final linePaint = Paint()
+        ..color = lineColor
+        ..strokeWidth = 2.6
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round;
+      canvas.drawPath(linePath, linePaint);
+    }
+
+    for (int i = 0; i < puntos.length; i++) {
+      final p = puntos[i];
+      final c = coords[i];
+
+      final Color dotColor = !p.jugoEstaFecha
+          ? Colors.grey
+          : (p.resultadoTexto == 'G'
+              ? Colors.greenAccent
+              : (p.resultadoTexto == 'E'
+                  ? Colors.amberAccent
+                  : Colors.redAccent));
+
+      canvas.drawCircle(c, 5.5, Paint()..color = const Color(0xFF0E1724));
+      canvas.drawCircle(c, 4.0, Paint()..color = dotColor);
+
+      final String valTxt = modoPuntos ? '${p.puntos}' : '#${p.posicion}';
+      final valPainter = TextPainter(
+        text: TextSpan(
+          text: valTxt,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      valPainter.paint(
+        canvas,
+        Offset(c.dx - valPainter.width / 2, (c.dy - 16).clamp(0.0, size.height)),
+      );
+
+      final fPainter = TextPainter(
+        text: TextSpan(
+          text: 'F${p.fechaNum}',
+          style: const TextStyle(color: Colors.grey, fontSize: 9),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      fPainter.paint(
+        canvas,
+        Offset(c.dx - fPainter.width / 2, padTop + plotH + 6),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _GraficoProgresoPainter oldDelegate) {
+    return oldDelegate.puntos != puntos ||
+        oldDelegate.modoPuntos != modoPuntos ||
+        oldDelegate.maxRank != maxRank;
   }
 }

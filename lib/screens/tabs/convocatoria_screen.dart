@@ -423,14 +423,14 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
         }
 
         return SingleChildScrollView(
-          padding: const EdgeInsets.all(16.0),
+          padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 12.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Card(
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 8.0),
+                  padding: const EdgeInsets.fromLTRB(8.0, 16.0, 8.0, 12.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -611,7 +611,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 6),
               Card(
                 color: Colors.white.withValues(alpha: 0.05),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -682,7 +682,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
               Row(
                 children: [
                   Expanded(
@@ -712,6 +712,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
               else
                 ListView.builder(
                   shrinkWrap: true,
+                  padding: EdgeInsets.zero,
                   physics: const NeverScrollableScrollPhysics(),
                   itemCount: titularesConfirmados.length,
                   itemBuilder: (context, index) {
@@ -797,7 +798,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                   },
                 ),
               if (enEsperaConfirmados.isNotEmpty) ...[
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -818,6 +819,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                 const SizedBox(height: 8),
                 ListView.builder(
                   shrinkWrap: true,
+                  padding: EdgeInsets.zero,
                   physics: const NeverScrollableScrollPhysics(),
                   itemCount: enEsperaConfirmados.length,
                   itemBuilder: (context, index) {
@@ -827,10 +829,9 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                     return Card(
                       key: ValueKey(j.nombre),
                       margin: const EdgeInsets.symmetric(vertical: 4),
-                      color: Colors.orangeAccent.withValues(alpha: 0.08),
+                      color: Colors.white.withValues(alpha: 0.03),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10),
-                        side: BorderSide(color: Colors.orangeAccent.withValues(alpha: 0.3)),
                       ),
                       child: ListTile(
                         dense: true,
@@ -900,8 +901,88 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                   },
                 ),
               ],
+              if (bajas.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Text(
+                  'No juegan (${bajas.length})',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.redAccent,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ListView.builder(
+                  shrinkWrap: true,
+                  padding: EdgeInsets.zero,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: bajas.length,
+                  itemBuilder: (context, index) {
+                    final j = bajas[index];
+                    final esYo = sonElMismoJugador(j.nombre, widget.nombreJugador);
+                    return Card(
+                      key: ValueKey(j.nombre),
+                      color: Colors.white.withValues(alpha: 0.03),
+                      margin: const EdgeInsets.symmetric(vertical: 2),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: ListTile(
+                        dense: true,
+                        leading: const Icon(Icons.person_off_outlined, color: Colors.grey, size: 18),
+                        title: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                j.nombre,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontWeight: esYo ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              ),
+                            ),
+                            if (esYo) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.blueAccent,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  'Tú',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text(
+                              'Baja',
+                              style: TextStyle(
+                                color: Colors.redAccent,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            _buildBotonAdmin(j, 'baja'),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ],
               if (pendientes.isNotEmpty) ...[
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -922,6 +1003,7 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                 const SizedBox(height: 8),
                 ListView.builder(
                   shrinkWrap: true,
+                  padding: EdgeInsets.zero,
                   physics: const NeverScrollableScrollPhysics(),
                   itemCount: pendientes.length,
                   itemBuilder: (context, index) {
@@ -976,57 +1058,6 @@ class _ConvocatoriaScreenState extends State<ConvocatoriaScreen> {
                   },
                 ),
               ],
-              if (bajas.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                Text(
-                  'No juegan (${bajas.length})',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: bajas.length,
-                  itemBuilder: (context, index) {
-                    final j = bajas[index];
-                    return Card(
-                      key: ValueKey(j.nombre),
-                      color: Colors.white.withValues(alpha: 0.03),
-                      margin: const EdgeInsets.symmetric(vertical: 2),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.person_off_outlined, color: Colors.grey, size: 18),
-                        title: Text(
-                          j.nombre,
-                          style: const TextStyle(color: Colors.grey),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text(
-                              'Baja',
-                              style: TextStyle(
-                                color: Colors.redAccent,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            _buildBotonAdmin(j, 'baja'),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ],
-              const SizedBox(height: 24),
             ],
           ),
         );
