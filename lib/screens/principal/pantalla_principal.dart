@@ -375,6 +375,9 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
     BuildContext context,
     Map<String, dynamic> datosActuales,
   ) {
+    bool tempRegistrarTantos =
+        (datosActuales['registrarTantos'] ?? false) as bool;
+
     final diaCtrl = TextEditingController(
       text: datosActuales['dia'] ?? 'Viernes 30 de Octubre',
     );
@@ -426,225 +429,332 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
         ? TimeOfDay.fromDateTime(fechaRecordatorioSeleccionada)
         : const TimeOfDay(hour: 10, minute: 0);
 
+    InputDecoration campoDeco({
+      required String label,
+      required IconData icon,
+      Color? iconColor,
+      String? hint,
+    }) {
+      return InputDecoration(
+        labelText: label,
+        hintText: hint,
+        labelStyle: const TextStyle(fontSize: 12),
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(vertical: 8),
+        prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
+        prefixIcon: Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: Icon(icon, size: 17, color: iconColor ?? Colors.white70),
+        ),
+      );
+    }
+
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDlgState) => AlertDialog(
+          insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 20),
+          titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          contentPadding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Row(
             children: [
-              Icon(Icons.admin_panel_settings, color: Colors.lightBlueAccent),
+              Icon(Icons.admin_panel_settings, color: Colors.lightBlueAccent, size: 20),
               SizedBox(width: 8),
               Expanded(
                 child: Text(
                   'Configurar Torneo',
-                  style: TextStyle(fontSize: 17),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
             ],
           ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: nombreTorneoCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Nombre del Torneo',
-                    prefixIcon: Icon(
-                      Icons.emoji_events_outlined,
-                      color: Colors.lightBlueAccent,
-                      size: 20,
+          content: SizedBox(
+            width: MediaQuery.of(context).size.width,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: nombreTorneoCtrl,
+                    style: const TextStyle(fontSize: 13.5),
+                    decoration: campoDeco(
+                      label: 'Nombre del Torneo',
+                      icon: Icons.emoji_events_outlined,
+                      iconColor: Colors.lightBlueAccent,
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: fechaInicioTorneoCtrl,
-                        readOnly: true,
-                        onTap: () async {
-                          final picked = await showDatePicker(
-                            context: context,
-                            initialDate: fechaInicioTorneoSeleccionada ?? DateTime.now(),
-                            firstDate: DateTime(2024),
-                            lastDate: DateTime(2035),
-                          );
-                          if (picked != null) {
-                            setDlgState(() {
-                              fechaInicioTorneoSeleccionada = picked;
-                              fechaInicioTorneoCtrl.text = formatearFechaEspanol(picked);
-                            });
-                          }
-                        },
-                        decoration: const InputDecoration(
-                          labelText: 'Inicio Torneo',
-                          prefixIcon: Icon(Icons.date_range, color: Colors.tealAccent, size: 18),
-                          isDense: true,
+                  const SizedBox(height: 10),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () => setDlgState(() => tempRegistrarTantos = !tempRegistrarTantos),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.scoreboard_outlined,
+                            color: Colors.tealAccent,
+                            size: 17,
+                          ),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Llevar registro de tantos',
+                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                                ),
+                                Text(
+                                  'Habilita contadores y Top 3 en estadísticas',
+                                  style: TextStyle(fontSize: 11, color: Colors.grey),
+                                ),
+                              ],
+                            ),
+                          ),
+                          SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: Checkbox(
+                              value: tempRegistrarTantos,
+                              activeColor: Colors.tealAccent,
+                              checkColor: Colors.black,
+                              visualDensity: VisualDensity.compact,
+                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              onChanged: (v) => setDlgState(() => tempRegistrarTantos = v ?? false),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: fechaInicioTorneoCtrl,
+                          readOnly: true,
+                          style: const TextStyle(fontSize: 13),
+                          onTap: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: fechaInicioTorneoSeleccionada ?? DateTime.now(),
+                              firstDate: DateTime(2024),
+                              lastDate: DateTime(2035),
+                            );
+                            if (picked != null) {
+                              setDlgState(() {
+                                fechaInicioTorneoSeleccionada = picked;
+                                fechaInicioTorneoCtrl.text = formatearFechaEspanol(picked);
+                              });
+                            }
+                          },
+                          decoration: campoDeco(
+                            label: 'Inicio Torneo',
+                            icon: Icons.date_range,
+                            iconColor: Colors.tealAccent,
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: fechaFinTorneoCtrl,
-                        readOnly: true,
-                        onTap: () async {
-                          final picked = await showDatePicker(
-                            context: context,
-                            initialDate: fechaFinTorneoSeleccionada ?? DateTime.now().add(const Duration(days: 60)),
-                            firstDate: DateTime(2024),
-                            lastDate: DateTime(2035),
-                          );
-                          if (picked != null) {
-                            setDlgState(() {
-                              fechaFinTorneoSeleccionada = picked;
-                              fechaFinTorneoCtrl.text = formatearFechaEspanol(picked);
-                            });
-                          }
-                        },
-                        decoration: const InputDecoration(
-                          labelText: 'Fin Torneo',
-                          prefixIcon: Icon(Icons.flag_outlined, color: Colors.amberAccent, size: 18),
-                          isDense: true,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: fechaFinTorneoCtrl,
+                          readOnly: true,
+                          style: const TextStyle(fontSize: 13),
+                          onTap: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: fechaFinTorneoSeleccionada ?? DateTime.now().add(const Duration(days: 60)),
+                              firstDate: DateTime(2024),
+                              lastDate: DateTime(2035),
+                            );
+                            if (picked != null) {
+                              setDlgState(() {
+                                fechaFinTorneoSeleccionada = picked;
+                                fechaFinTorneoCtrl.text = formatearFechaEspanol(picked);
+                              });
+                            }
+                          },
+                          decoration: campoDeco(
+                            label: 'Fin Torneo',
+                            icon: Icons.flag_outlined,
+                            iconColor: Colors.amberAccent,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: diaCtrl,
-                  readOnly: true,
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: fechaPartidoSeleccionada,
-                      firstDate: DateTime(2024),
-                      lastDate: DateTime(2035),
-                    );
-                    if (picked != null) {
-                      setDlgState(() {
-                        fechaPartidoSeleccionada = picked;
-                        diaCtrl.text = formatearFechaEspanol(picked);
-                      });
-                    }
-                  },
-                  decoration: const InputDecoration(
-                    labelText: 'Fecha del Partido Actual',
-                    prefixIcon: Icon(Icons.calendar_month, color: Colors.lightBlueAccent, size: 20),
-                    suffixIcon: Icon(Icons.arrow_drop_down),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: horaCtrl,
-                  readOnly: true,
-                  onTap: () async {
-                    final picked = await showTimePicker(
-                      context: context,
-                      initialTime: const TimeOfDay(hour: 20, minute: 0),
-                    );
-                    if (picked != null) horaCtrl.text = formatearHora(picked);
-                  },
-                  decoration: const InputDecoration(
-                    labelText: 'Horario',
-                    prefixIcon: Icon(Icons.access_time, color: Colors.lightBlueAccent, size: 20),
-                    suffixIcon: Icon(Icons.arrow_drop_down),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: lugarCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Cancha / Dirección',
-                    prefixIcon: Icon(Icons.location_on_outlined, size: 20),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: mapsUrlCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Link de Google Maps',
-                    prefixIcon: Icon(Icons.map_outlined, size: 20),
-                    hintText: 'https://maps.google.com/...',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: cupoCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Cupo Total de Jugadores',
-                    prefixIcon: Icon(Icons.people_alt_outlined, size: 20),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Divider(),
-                const Row(
-                  children: [
-                    Icon(Icons.alarm, color: Colors.tealAccent, size: 18),
-                    SizedBox(width: 8),
-                    Text(
-                      'Recordatorio de Confirmación',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.tealAccent,
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: TextField(
+                          controller: diaCtrl,
+                          readOnly: true,
+                          style: const TextStyle(fontSize: 13),
+                          onTap: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: fechaPartidoSeleccionada,
+                              firstDate: DateTime(2024),
+                              lastDate: DateTime(2035),
+                            );
+                            if (picked != null) {
+                              setDlgState(() {
+                                fechaPartidoSeleccionada = picked;
+                                diaCtrl.text = formatearFechaEspanol(picked);
+                              });
+                            }
+                          },
+                          decoration: campoDeco(
+                            label: 'Fecha del Partido',
+                            icon: Icons.calendar_month,
+                            iconColor: Colors.lightBlueAccent,
+                          ),
+                        ),
                       ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: horaCtrl,
+                          readOnly: true,
+                          style: const TextStyle(fontSize: 13),
+                          onTap: () async {
+                            final picked = await showTimePicker(
+                              context: context,
+                              initialTime: const TimeOfDay(hour: 20, minute: 0),
+                            );
+                            if (picked != null) horaCtrl.text = formatearHora(picked);
+                          },
+                          decoration: campoDeco(
+                            label: 'Horario',
+                            icon: Icons.access_time,
+                            iconColor: Colors.lightBlueAccent,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: TextField(
+                          controller: lugarCtrl,
+                          style: const TextStyle(fontSize: 13),
+                          decoration: campoDeco(
+                            label: 'Cancha / Dirección',
+                            icon: Icons.location_on_outlined,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: cupoCtrl,
+                          keyboardType: TextInputType.number,
+                          style: const TextStyle(fontSize: 13),
+                          decoration: campoDeco(
+                            label: 'Cupo Total',
+                            icon: Icons.people_alt_outlined,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: mapsUrlCtrl,
+                    style: const TextStyle(fontSize: 13),
+                    decoration: campoDeco(
+                      label: 'Link de Google Maps',
+                      icon: Icons.map_outlined,
+                      hint: 'https://maps.google.com/...',
                     ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: recDiaCtrl,
-                  readOnly: true,
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: fechaRecordatorioSeleccionada,
-                      firstDate: DateTime(2024),
-                      lastDate: DateTime(2035),
-                    );
-                    if (picked != null) {
-                      setDlgState(() {
-                        fechaRecordatorioSeleccionada = picked;
-                        recDiaCtrl.text = formatearFechaEspanol(picked);
-                      });
-                    }
-                  },
-                  decoration: const InputDecoration(
-                    labelText: 'Día del Recordatorio',
-                    prefixIcon: Icon(Icons.calendar_today, size: 18),
-                    suffixIcon: Icon(Icons.arrow_drop_down),
                   ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: recHoraCtrl,
-                  readOnly: true,
-                  onTap: () async {
-                    final picked = await showTimePicker(
-                      context: context,
-                      initialTime: horaRecordatorioSeleccionada,
-                    );
-                    if (picked != null) {
-                      setDlgState(() {
-                        horaRecordatorioSeleccionada = picked;
-                        recHoraCtrl.text = formatearHora(picked);
-                      });
-                    }
-                  },
-                  decoration: const InputDecoration(
-                    labelText: 'Hora del Recordatorio',
-                    prefixIcon: Icon(Icons.access_time, size: 18),
-                    suffixIcon: Icon(Icons.arrow_drop_down),
+                  const SizedBox(height: 14),
+                  const Row(
+                    children: [
+                      Icon(Icons.alarm, color: Colors.tealAccent, size: 17),
+                      SizedBox(width: 8),
+                      Text(
+                        'Recordatorio de Confirmación',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.tealAccent,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-              ],
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: TextField(
+                          controller: recDiaCtrl,
+                          readOnly: true,
+                          style: const TextStyle(fontSize: 13),
+                          onTap: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: fechaRecordatorioSeleccionada,
+                              firstDate: DateTime(2024),
+                              lastDate: DateTime(2035),
+                            );
+                            if (picked != null) {
+                              setDlgState(() {
+                                fechaRecordatorioSeleccionada = picked;
+                                recDiaCtrl.text = formatearFechaEspanol(picked);
+                              });
+                            }
+                          },
+                          decoration: campoDeco(
+                            label: 'Día Recordatorio',
+                            icon: Icons.calendar_today,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: recHoraCtrl,
+                          readOnly: true,
+                          style: const TextStyle(fontSize: 13),
+                          onTap: () async {
+                            final picked = await showTimePicker(
+                              context: context,
+                              initialTime: horaRecordatorioSeleccionada,
+                            );
+                            if (picked != null) {
+                              setDlgState(() {
+                                horaRecordatorioSeleccionada = picked;
+                                recHoraCtrl.text = formatearHora(picked);
+                              });
+                            }
+                          },
+                          decoration: campoDeco(
+                            label: 'Hora',
+                            icon: Icons.access_time,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
           actions: [
@@ -667,6 +777,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                   'nombreTorneo': nombreTorneoCtrl.text.trim().isNotEmpty
                       ? nombreTorneoCtrl.text.trim()
                       : kNombreTorneo,
+                  'registrarTantos': tempRegistrarTantos,
                   'fechaInicioTorneo': fechaInicioTorneoCtrl.text.trim(),
                   'fechaInicioTorneoMillis': fechaInicioTorneoSeleccionada?.millisecondsSinceEpoch,
                   'fechaFinTorneo': fechaFinTorneoCtrl.text.trim(),
@@ -713,6 +824,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
 
         final infoPartido = (snapshotPartido.data!.data() as Map<String, dynamic>?) ?? {};
         final String nombreTorneoActual = (infoPartido['nombreTorneo'] ?? kNombreTorneo).toString();
+        final bool registrarTantos = (infoPartido['registrarTantos'] ?? false) as bool;
 
         return StreamBuilder<DocumentSnapshot>(
           stream: _streamPlantel,
@@ -851,6 +963,7 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                 suplentes: suplentesActuales,
                 nombreTorneoActual: nombreTorneoActual,
                 historialTorneos: historialTorneos,
+                registrarTantos: registrarTantos,
               ),
               RotacionScreen(
                 esAdmin: _esAdmin,
@@ -860,7 +973,13 @@ class _PantallaPrincipalState extends State<PantallaPrincipal> {
                 asistencia: (infoPartido['asistencia'] as Map<String, dynamic>?) ?? {},
                 onAbrirGestionPlantel: () => _abrirGestionPlantel(context),
               ),
-              VestuarioScreen(aliasUsuario: aliasUsuario),
+              VestuarioScreen(
+                aliasUsuario: aliasUsuario,
+                emailUsuario: widget.emailJugador,
+                uidUsuario: currentUid,
+                titulares: titularesActuales,
+                suplentes: suplentesActuales,
+              ),
             ];
 
             return Scaffold(

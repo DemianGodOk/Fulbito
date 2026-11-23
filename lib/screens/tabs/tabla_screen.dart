@@ -11,6 +11,7 @@ class TablaScreen extends StatefulWidget {
   final List<Jugador> suplentes;
   final String nombreTorneoActual;
   final List<String> historialTorneos;
+  final bool registrarTantos;
 
   const TablaScreen({
     super.key,
@@ -21,6 +22,7 @@ class TablaScreen extends StatefulWidget {
     required this.suplentes,
     this.nombreTorneoActual = '',
     this.historialTorneos = const [],
+    this.registrarTantos = false,
   });
 
   @override
@@ -187,8 +189,7 @@ class _TablaScreenState extends State<TablaScreen> {
   }
 
   void _mostrarDialogoCargarResultado(BuildContext context) async {
-    final snapshotPartido =
-        await FirebaseFirestore.instance.collection('partidos').doc('actual').get();
+    final snapshotPartido = await FirebaseFirestore.instance.collection('partidos').doc('actual').get();
     final Map<String, dynamic> asistenciaActiva =
         (snapshotPartido.data()?['asistencia'] as Map<String, dynamic>?) ?? {};
     final Map<String, dynamic> ultimaAsistencia =
@@ -210,6 +211,7 @@ class _TablaScreenState extends State<TablaScreen> {
       ...widget.suplentes.map((s) => s.nombre)
     ];
     todoElPlantel.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    jugadoresConfirmados.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
 
     bool mostrarTodos = jugadoresConfirmados.isEmpty;
     List<String> jugadoresDisponibles =
@@ -224,9 +226,297 @@ class _TablaScreenState extends State<TablaScreen> {
     final nombreEquipoBCtrl = TextEditingController(text: 'Equipo Amarillo');
     final videoUrlCtrl = TextEditingController();
 
+    // 0 = sin asignar, 1 = Equipo A (izquierda), 2 = Equipo B (derecha)
     final Map<String, int> asignaciones = {
       for (final j in todoElPlantel) j: 0,
     };
+    final Map<String, int> tantosPorJugador = {
+      for (final j in todoElPlantel) j: 0,
+    };
+    bool registrarTantosModal = widget.registrarTantos;
+
+    int sumaTantosEquipo(int eq) {
+      int total = 0;
+      for (final entry in asignaciones.entries) {
+        if (entry.value == eq) {
+          total += tantosPorJugador[entry.key] ?? 0;
+        }
+      }
+      return total;
+    }
+
+    void ajustarTantosJugador(
+      StateSetter setModalState,
+      String jugador,
+      int equipoNum,
+      int delta,
+    ) {
+      final int prevSuma = sumaTantosEquipo(equipoNum);
+      final int actual = tantosPorJugador[jugador] ?? 0;
+      final int nuevo = (actual + delta).clamp(0, 99);
+      if (nuevo == actual) return;
+
+      setModalState(() {
+        tantosPorJugador[jugador] = nuevo;
+        final int nuevaSuma = sumaTantosEquipo(equipoNum);
+        final ctrl = equipoNum == 1 ? golesACtrl : golesBCtrl;
+        final int marcadorActual = int.tryParse(ctrl.text.trim()) ?? 0;
+        if (marcadorActual == prevSuma) {
+          ctrl.text = '$nuevaSuma';
+        }
+      });
+    }
+
+    Widget buildColumnaEquipo({
+      required StateSetter setModalState,
+      required int equipoNum, // 1 = izquierda (Celeste), 2 = derecha (Amarillo)
+      required String tituloEquipo,
+      required Color colorEquipo,
+    }) {
+      final bool esIzquierda = equipoNum == 1;
+      final int otroEquipo = esIzquierda ? 2 : 1;
+
+      return Container(
+        decoration: BoxDecoration(
+          color: colorEquipo.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colorEquipo.withValues(alpha: 0.25)),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              tituloEquipo,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: colorEquipo,
+              ),
+            ),
+            const Divider(height: 12),
+            if (jugadoresDisponibles.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text(
+                  'Sin jugadores',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 11, color: Colors.grey),
+                ),
+              )
+            else
+              ...jugadoresDisponibles.map((jugador) {
+                final int estado = asignaciones[jugador] ?? 0;
+                final bool seleccionadoAqui = estado == equipoNum;
+                final bool deshabilitado = estado == otroEquipo;
+                final int tantos = tantosPorJugador[jugador] ?? 0;
+
+                Widget buildContador() {
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      InkWell(
+                        borderRadius: BorderRadius.circular(6),
+                        onTap: () => ajustarTantosJugador(
+                          setModalState,
+                          jugador,
+                          equipoNum,
+                          -1,
+                        ),
+                        child: Container(
+                          width: 22,
+                          height: 22,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            '-',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white70,
+                              height: 1.0,
+                            ),
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                        width: 20,
+                        child: Text(
+                          '$tantos',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: tantos > 0 ? colorEquipo : Colors.white,
+                          ),
+                        ),
+                      ),
+                      InkWell(
+                        borderRadius: BorderRadius.circular(6),
+                        onTap: () => ajustarTantosJugador(
+                          setModalState,
+                          jugador,
+                          equipoNum,
+                          1,
+                        ),
+                        child: Container(
+                          width: 22,
+                          height: 22,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: colorEquipo.withValues(alpha: 0.22),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            '+',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: colorEquipo,
+                              height: 1.0,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                }
+
+                void toggleSeleccion() {
+                  if (deshabilitado) return;
+                  final int prevSuma = sumaTantosEquipo(equipoNum);
+                  setModalState(() {
+                    if (seleccionadoAqui) {
+                      asignaciones[jugador] = 0;
+                      tantosPorJugador[jugador] = 0;
+                      final int nuevaSuma = sumaTantosEquipo(equipoNum);
+                      final ctrl = equipoNum == 1 ? golesACtrl : golesBCtrl;
+                      final int marcadorActual =
+                          int.tryParse(ctrl.text.trim()) ?? 0;
+                      if (marcadorActual == prevSuma) {
+                        ctrl.text = '$nuevaSuma';
+                      }
+                    } else {
+                      asignaciones[jugador] = equipoNum;
+                    }
+                  });
+                }
+
+                return Container(
+                  margin: const EdgeInsets.symmetric(vertical: 2.5),
+                  decoration: BoxDecoration(
+                    color: seleccionadoAqui
+                        ? colorEquipo.withValues(alpha: 0.2)
+                        : Colors.white.withValues(alpha: deshabilitado ? 0.01 : 0.04),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: seleccionadoAqui
+                          ? colorEquipo.withValues(alpha: 0.65)
+                          : Colors.transparent,
+                    ),
+                  ),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: deshabilitado ? null : toggleSeleccion,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 6,
+                      ),
+                      child: Row(
+                        children: esIzquierda
+                            ? [
+                                if (!registrarTantosModal || !seleccionadoAqui) ...[
+                                  Icon(
+                                    seleccionadoAqui
+                                        ? Icons.check_circle
+                                        : Icons.radio_button_unchecked,
+                                    size: 14,
+                                    color: deshabilitado
+                                        ? Colors.white12
+                                        : (seleccionadoAqui
+                                            ? colorEquipo
+                                            : Colors.white38),
+                                  ),
+                                  const SizedBox(width: 5),
+                                ],
+                                Expanded(
+                                  child: Text(
+                                    jugador,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: seleccionadoAqui
+                                          ? FontWeight.bold
+                                          : FontWeight.normal,
+                                      color: deshabilitado
+                                          ? Colors.white24
+                                          : (seleccionadoAqui
+                                              ? Colors.white
+                                              : Colors.white70),
+                                    ),
+                                  ),
+                                ),
+                                if (registrarTantosModal && seleccionadoAqui) ...[
+                                  const SizedBox(width: 4),
+                                  buildContador(),
+                                ],
+                              ]
+                            : [
+                                if (registrarTantosModal && seleccionadoAqui) ...[
+                                  buildContador(),
+                                  const SizedBox(width: 4),
+                                ],
+                                Expanded(
+                                  child: Text(
+                                    jugador,
+                                    textAlign: TextAlign.right,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: seleccionadoAqui
+                                          ? FontWeight.bold
+                                          : FontWeight.normal,
+                                      color: deshabilitado
+                                          ? Colors.white24
+                                          : (seleccionadoAqui
+                                              ? Colors.white
+                                              : Colors.white70),
+                                    ),
+                                  ),
+                                ),
+                                if (!registrarTantosModal || !seleccionadoAqui) ...[
+                                  const SizedBox(width: 5),
+                                  Icon(
+                                    seleccionadoAqui
+                                        ? Icons.check_circle
+                                        : Icons.radio_button_unchecked,
+                                    size: 14,
+                                    color: deshabilitado
+                                        ? Colors.white12
+                                        : (seleccionadoAqui
+                                            ? colorEquipo
+                                            : Colors.white38),
+                                  ),
+                                ],
+                              ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
+          ],
+        ),
+      );
+    }
 
     showModalBottomSheet(
       context: context,
@@ -245,10 +535,10 @@ class _TablaScreenState extends State<TablaScreen> {
 
           return Padding(
             padding: EdgeInsets.only(
-              top: 20,
-              left: 20,
-              right: 20,
-              bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+              top: 16,
+              left: 16,
+              right: 16,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 16,
             ),
             child: SafeArea(
               top: false,
@@ -276,7 +566,7 @@ class _TablaScreenState extends State<TablaScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
                     TextField(
                       controller: fechaCtrl,
                       readOnly: true,
@@ -298,7 +588,7 @@ class _TablaScreenState extends State<TablaScreen> {
                         isDense: true,
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
                     TextField(
                       controller: videoUrlCtrl,
                       decoration: const InputDecoration(
@@ -308,7 +598,7 @@ class _TablaScreenState extends State<TablaScreen> {
                         isDense: true,
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
                     Row(
                       children: [
                         Expanded(
@@ -316,6 +606,7 @@ class _TablaScreenState extends State<TablaScreen> {
                             children: [
                               TextField(
                                 controller: nombreEquipoACtrl,
+                                onChanged: (_) => setModalState(() {}),
                                 textAlign: TextAlign.center,
                                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                                 decoration: const InputDecoration(
@@ -362,6 +653,7 @@ class _TablaScreenState extends State<TablaScreen> {
                             children: [
                               TextField(
                                 controller: nombreEquipoBCtrl,
+                                onChanged: (_) => setModalState(() {}),
                                 textAlign: TextAlign.center,
                                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                                 decoration: const InputDecoration(
@@ -394,21 +686,47 @@ class _TablaScreenState extends State<TablaScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 14),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        const Expanded(
-                          child: Text(
-                            'Asignar Equipos\n(Celeste -> Amarillo -> Quitar)',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey),
+                        InkWell(
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: () => setModalState(
+                              () => registrarTantosModal = !registrarTantosModal),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: Checkbox(
+                                  value: registrarTantosModal,
+                                  activeColor: Colors.tealAccent,
+                                  checkColor: Colors.black,
+                                  onChanged: (v) => setModalState(
+                                      () => registrarTantosModal = v ?? false),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              const Text(
+                                'Tantos',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.tealAccent,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Text('Mostrar\ntodos', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, color: Colors.grey)),
+                            const Text(
+                              'Mostrar todos',
+                              style: TextStyle(fontSize: 11, color: Colors.grey),
+                            ),
                             Switch(
                               value: mostrarTodos,
                               onChanged: (val) {
@@ -417,10 +735,12 @@ class _TablaScreenState extends State<TablaScreen> {
                                   if (mostrarTodos) {
                                     jugadoresDisponibles = todoElPlantel;
                                   } else {
-                                    jugadoresDisponibles = List.from(jugadoresConfirmados);
+                                    jugadoresDisponibles =
+                                        List.from(jugadoresConfirmados);
                                     for (final key in asignaciones.keys.toList()) {
                                       if (!jugadoresDisponibles.contains(key)) {
                                         asignaciones[key] = 0;
+                                        tantosPorJugador[key] = 0;
                                       }
                                     }
                                   }
@@ -431,38 +751,34 @@ class _TablaScreenState extends State<TablaScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 4),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 6,
-                      children: jugadoresDisponibles.map((jugador) {
-                        final estado = asignaciones[jugador] ?? 0;
-                        Color bg = Colors.white10;
-                        Color text = Colors.white70;
-                        IconData icon = Icons.add;
-
-                        if (estado == 1) {
-                          bg = Colors.lightBlueAccent.withValues(alpha: 0.25);
-                          text = Colors.lightBlueAccent;
-                          icon = Icons.check_circle;
-                        } else if (estado == 2) {
-                          bg = Colors.orangeAccent.withValues(alpha: 0.25);
-                          text = Colors.orangeAccent;
-                          icon = Icons.check_circle_outline;
-                        }
-
-                        return ActionChip(
-                          avatar: Icon(icon, size: 14, color: text),
-                          label: Text(jugador, style: TextStyle(color: text, fontSize: 12)),
-                          backgroundColor: bg,
-                          side: BorderSide(color: text.withValues(alpha: 0.4)),
-                          onPressed: () {
-                            setModalState(() => asignaciones[jugador] = (estado + 1) % 3);
-                          },
-                        );
-                      }).toList(),
+                    const SizedBox(height: 6),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: buildColumnaEquipo(
+                            setModalState: setModalState,
+                            equipoNum: 1,
+                            tituloEquipo: nombreEquipoACtrl.text.trim().isNotEmpty
+                                ? nombreEquipoACtrl.text.trim()
+                                : 'Equipo Celeste',
+                            colorEquipo: Colors.lightBlueAccent,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: buildColumnaEquipo(
+                            setModalState: setModalState,
+                            equipoNum: 2,
+                            tituloEquipo: nombreEquipoBCtrl.text.trim().isNotEmpty
+                                ? nombreEquipoBCtrl.text.trim()
+                                : 'Equipo Amarillo',
+                            colorEquipo: Colors.orangeAccent,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 20),
                     FilledButton.icon(
                       icon: const Icon(Icons.save),
                       label: const Text('Guardar Partido y Actualizar Rotación'),
@@ -485,6 +801,16 @@ class _TablaScreenState extends State<TablaScreen> {
                             ? _torneoSeleccionado!
                             : widget.nombreTorneoActual;
 
+                        final Map<String, int> tantosGuardar = {};
+                        if (registrarTantosModal) {
+                          for (final j in [...equipoA, ...equipoB]) {
+                            final t = tantosPorJugador[j] ?? 0;
+                            if (t > 0) {
+                              tantosGuardar[j] = t;
+                            }
+                          }
+                        }
+
                         await FirebaseFirestore.instance.collection('historial_partidos').add({
                           'torneo': torneoGuardar,
                           'fecha': fechaCtrl.text.trim(),
@@ -494,6 +820,7 @@ class _TablaScreenState extends State<TablaScreen> {
                           'equipoB_goles': golesB,
                           'equipoA_jugadores': equipoA,
                           'equipoB_jugadores': equipoB,
+                          if (tantosGuardar.isNotEmpty) 'tantos': tantosGuardar,
                           'videoUrl': videoUrlCtrl.text.trim(),
                           'creadoEn': FieldValue.serverTimestamp(),
                         });
@@ -600,6 +927,7 @@ class _TablaScreenState extends State<TablaScreen> {
     final Map<String, int> rachaDerrotasHistorica = {};
     final Map<String, int> rachaSinGanarActual = {};
     final Map<String, int> rachaSinGanarHistorica = {};
+    final Map<String, int> tantosTotales = {};
 
     for (final doc in cronologicos) {
       final data = doc.data() as Map<String, dynamic>;
@@ -607,6 +935,19 @@ class _TablaScreenState extends State<TablaScreen> {
       final int golesB = data['equipoB_goles'] ?? 0;
       final List rawA = data['equipoA_jugadores'] ?? [];
       final List rawB = data['equipoB_jugadores'] ?? [];
+
+      if (data['tantos'] is Map) {
+        final rawTantos = Map<String, dynamic>.from(data['tantos'] as Map);
+        for (final entry in rawTantos.entries) {
+          final jug = canonicalizar(entry.key.toString());
+          final int val = entry.value is int
+              ? entry.value as int
+              : int.tryParse('${entry.value}') ?? 0;
+          if (jug.isNotEmpty && val > 0) {
+            tantosTotales[jug] = (tantosTotales[jug] ?? 0) + val;
+          }
+        }
+      }
 
       final List<String> teamA = rawA
           .map((j) => canonicalizar(j.toString()))
@@ -767,6 +1108,14 @@ class _TablaScreenState extends State<TablaScreen> {
       }
     }
 
+    final rankingTantos = tantosTotales.entries.toList()
+      ..sort((a, b) {
+        final cmp = b.value.compareTo(a.value);
+        if (cmp != 0) return cmp;
+        return a.key.toLowerCase().compareTo(b.key.toLowerCase());
+      });
+    final top3Tantos = rankingTantos.take(3).toList();
+
     Widget buildStatCard({
       required IconData icon,
       required Color iconColor,
@@ -834,6 +1183,128 @@ class _TablaScreenState extends State<TablaScreen> {
                         ),
                       ),
                     ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    Widget buildTop3TantosCard() {
+      const Color accent = Colors.lightGreenAccent;
+      final List<Color> coloresPodio = [
+        Colors.amberAccent,
+        Colors.lightBlueAccent,
+        Colors.orangeAccent,
+      ];
+
+      return Card(
+        margin: const EdgeInsets.only(bottom: 12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        color: const Color(0xFF16253B),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.scoreboard_outlined,
+                  color: accent,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'TOP 3 GOLEADORES',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: accent,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    if (top3Tantos.isEmpty) ...[
+                      const Text(
+                        'Sin tantos registrados',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      const Text(
+                        'Activá "Tantos" al cargar un resultado para sumar',
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ] else
+                      ...List.generate(top3Tantos.length, (i) {
+                        final entry = top3Tantos[i];
+                        final colorPos = coloresPodio[i];
+                        final int cant = entry.value;
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 4.0),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 22,
+                                alignment: Alignment.center,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 1,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: colorPos.withValues(alpha: 0.18),
+                                  borderRadius: BorderRadius.circular(5),
+                                ),
+                                child: Text(
+                                  '${i + 1}°',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: colorPos,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  entry.key,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                              Text(
+                                '$cant ${cant == 1 ? 'tanto' : 'tantos'}',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: colorPos,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
                   ],
                 ),
               ),
@@ -1004,6 +1475,7 @@ class _TablaScreenState extends State<TablaScreen> {
             );
           },
         ),
+        if (widget.registrarTantos) buildTop3TantosCard(),
       ],
     );
   }
@@ -1139,89 +1611,83 @@ class _TablaScreenState extends State<TablaScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (hayVariosTorneos) ...[
-                  Builder(
-                    builder: (btnContext) {
-                      return InkWell(
-                        borderRadius: BorderRadius.circular(12),
-                        onTap: alcanceEfectivo == 2
-                            ? null
-                            : () async {
-                                final RenderBox box =
-                                    btnContext.findRenderObject() as RenderBox;
-                                final RenderBox overlay = Overlay.of(btnContext)
-                                    .context
-                                    .findRenderObject() as RenderBox;
-                                final Offset topLeft = box.localToGlobal(
-                                    Offset.zero,
-                                    ancestor: overlay);
-                                final Offset bottomRight = box.localToGlobal(
-                                    box.size.bottomRight(Offset.zero),
-                                    ancestor: overlay);
-                                final RelativeRect position =
-                                    RelativeRect.fromRect(
-                                  Rect.fromPoints(topLeft, bottomRight),
-                                  Offset.zero & overlay.size,
-                                );
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final String textoSelector = alcanceEfectivo == 2
+                          ? 'Histórico Completo'
+                          : (alcanceEfectivo == 1
+                              ? 'Torneos $anioFiltro'
+                              : torneoRef);
+                      final Color colorTextoSelector = alcanceEfectivo == 2
+                          ? Colors.grey
+                          : (alcanceEfectivo == 1
+                              ? Colors.tealAccent
+                              : Colors.white);
+                      final Color colorIconoSelector = alcanceEfectivo == 2
+                          ? Colors.grey
+                          : (alcanceEfectivo == 1
+                              ? Colors.tealAccent
+                              : Colors.lightBlueAccent);
 
-                                final String? selected = await showMenu<String>(
-                                  context: btnContext,
-                                  position: position,
-                                  color: const Color(0xFF16253B),
-                                  menuPadding:
-                                      const EdgeInsets.symmetric(vertical: 4),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    side: const BorderSide(
-                                        color: Colors.white12),
-                                  ),
-                                  constraints: BoxConstraints(
-                                    minWidth: box.size.width,
-                                    maxWidth: box.size.width,
-                                  ),
-                                  items: torneosLista.map((String torneo) {
-                                    final bool esActualSel =
-                                        torneo == torneoRef;
-                                    return PopupMenuItem<String>(
-                                      value: torneo,
-                                      height: 34,
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 14),
-                                      child: Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              torneo,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: TextStyle(
-                                                fontWeight: esActualSel
-                                                    ? FontWeight.bold
-                                                    : FontWeight.w500,
-                                                fontSize: 13,
-                                                color: esActualSel
-                                                    ? Colors.lightBlueAccent
-                                                    : Colors.white,
-                                              ),
-                                            ),
-                                          ),
-                                          if (esActualSel)
-                                            const Icon(
-                                              Icons.check,
-                                              size: 16,
-                                              color: Colors.lightBlueAccent,
-                                            ),
-                                        ],
+                      return PopupMenuButton<String>(
+                        enabled: alcanceEfectivo != 2,
+                        initialValue: torneoRef,
+                        color: const Color(0xFF16253B),
+                        elevation: 8,
+                        offset: const Offset(0, 40),
+                        padding: EdgeInsets.zero,
+                        constraints: BoxConstraints(
+                          minWidth: constraints.maxWidth,
+                          maxWidth: constraints.maxWidth,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(
+                            color: Colors.lightBlueAccent.withValues(alpha: 0.25),
+                          ),
+                        ),
+                        onSelected: (String newValue) {
+                          if (newValue != _torneoSeleccionado) {
+                            setState(() {
+                              _torneoSeleccionado = newValue;
+                            });
+                          }
+                        },
+                        itemBuilder: (BuildContext context) {
+                          return torneosLista.map((String torneo) {
+                            final bool esActual = torneo == torneoRef;
+                            return PopupMenuItem<String>(
+                              value: torneo,
+                              height: 34,
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      torneo,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontWeight: esActual
+                                            ? FontWeight.bold
+                                            : FontWeight.w500,
+                                        fontSize: 12.5,
+                                        color: esActual
+                                            ? Colors.lightBlueAccent
+                                            : Colors.white,
                                       ),
-                                    );
-                                  }).toList(),
-                                );
-
-                                if (selected != null &&
-                                    selected != _torneoSeleccionado) {
-                                  setState(() {
-                                    _torneoSeleccionado = selected;
-                                  });
-                                }
-                              },
+                                    ),
+                                  ),
+                                  if (esActual)
+                                    const Icon(
+                                      Icons.check,
+                                      size: 15,
+                                      color: Colors.lightBlueAccent,
+                                    ),
+                                ],
+                              ),
+                            );
+                          }).toList();
+                        },
                         child: Container(
                           height: 36,
                           padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -1233,8 +1699,7 @@ class _TablaScreenState extends State<TablaScreen> {
                               color: alcanceEfectivo == 2
                                   ? Colors.white12
                                   : (alcanceEfectivo == 1
-                                      ? Colors.tealAccent
-                                          .withValues(alpha: 0.35)
+                                      ? Colors.tealAccent.withValues(alpha: 0.35)
                                       : Colors.lightBlueAccent
                                           .withValues(alpha: 0.3)),
                             ),
@@ -1243,31 +1708,19 @@ class _TablaScreenState extends State<TablaScreen> {
                             children: [
                               Expanded(
                                 child: Text(
-                                  alcanceEfectivo == 2
-                                      ? 'Histórico Completo'
-                                      : (alcanceEfectivo == 1
-                                          ? 'Torneos $anioFiltro'
-                                          : torneoRef),
+                                  textoSelector,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 13,
-                                    color: alcanceEfectivo == 2
-                                        ? Colors.grey
-                                        : (alcanceEfectivo == 1
-                                            ? Colors.tealAccent
-                                            : Colors.white),
+                                    color: colorTextoSelector,
                                   ),
                                 ),
                               ),
                               Icon(
                                 Icons.keyboard_arrow_down,
                                 size: 20,
-                                color: alcanceEfectivo == 2
-                                    ? Colors.grey
-                                    : (alcanceEfectivo == 1
-                                        ? Colors.tealAccent
-                                        : Colors.lightBlueAccent),
+                                color: colorIconoSelector,
                               ),
                             ],
                           ),
@@ -1620,7 +2073,7 @@ class _TablaScreenState extends State<TablaScreen> {
                       padding: const EdgeInsets.all(24.0),
                       child: Center(
                         child: Text(
-                          alcanceEfectivo == 2
+                          _alcanceFiltro == 2
                               ? 'No hay partidos registrados.'
                               : (alcanceEfectivo == 1 ? 'No hay partidos registrados en $anioFiltro.' : 'No hay partidos en este torneo.'),
                           style: const TextStyle(color: Colors.grey),
@@ -1645,6 +2098,20 @@ class _TablaScreenState extends State<TablaScreen> {
                         final List jugsA = data['equipoA_jugadores'] ?? [];
                         final List jugsB = data['equipoB_jugadores'] ?? [];
                         final String videoUrl = (data['videoUrl'] ?? '').toString().trim();
+                        final Map<String, dynamic> tantosDoc = data['tantos'] is Map
+                            ? Map<String, dynamic>.from(data['tantos'] as Map)
+                            : const {};
+
+                        String formatearJugadoresConTantos(List jugs) {
+                          return jugs.map((j) {
+                            final raw = j.toString();
+                            final nom = limpiarNombre(raw);
+                            final int cant = (tantosDoc[raw] is int)
+                                ? tantosDoc[raw] as int
+                                : (int.tryParse('${tantosDoc[raw] ?? tantosDoc[nom] ?? 0}') ?? 0);
+                            return cant > 0 ? '$nom ($cant)' : nom;
+                          }).join(', ');
+                        }
 
                         return Card(
                           margin: const EdgeInsets.only(bottom: 12),
@@ -1770,7 +2237,7 @@ class _TablaScreenState extends State<TablaScreen> {
                                   children: [
                                     Expanded(
                                       child: Text(
-                                        jugsA.map((j) => limpiarNombre(j.toString())).join(', '),
+                                        formatearJugadoresConTantos(jugsA),
                                         style: const TextStyle(
                                           fontSize: 11,
                                           color: Colors.white60,
@@ -1781,7 +2248,7 @@ class _TablaScreenState extends State<TablaScreen> {
                                     const SizedBox(width: 8),
                                     Expanded(
                                       child: Text(
-                                        jugsB.map((j) => limpiarNombre(j.toString())).join(', '),
+                                        formatearJugadoresConTantos(jugsB),
                                         style: const TextStyle(
                                           fontSize: 11,
                                           color: Colors.white60,

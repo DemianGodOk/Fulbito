@@ -1,5 +1,6 @@
 $ErrorActionPreference = "Stop"
 $proyecto = "fulbito-svfc"
+$cuentaFirebase = "demian.soriano@gmail.com"
 $firebaseBin = "C:\Home\Soft\Firebase\firebase.exe"
 
 if (-not (Test-Path $firebaseBin)) {
@@ -66,27 +67,11 @@ Write-Host "`n=======================================================" -Foregrou
 Write-Host " DESPLIEGUE AUTOMATICO: $tag (Build $buildNum)" -ForegroundColor Cyan
 Write-Host "=======================================================`n" -ForegroundColor Cyan
 
-# 4. Compilar Web
-Write-Host "1. Compilando Flutter Web..." -ForegroundColor Yellow
-flutter build web --release
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] Fallo la compilacion de Flutter." -ForegroundColor Red
-    exit 1
-}
-Write-Host "[OK] Compilacion lista.`n" -ForegroundColor Green
+# 4. Aislar credenciales de Git y subir primero para activar GitHub Actions en paralelo
+Write-Host "1. Subiendo cambios y activando GitHub Actions ($tag)..." -ForegroundColor Yellow
+git config --local credential.useHttpPath true
+git config --local user.email $cuentaFirebase
 
-# 5. Desplegar en Firebase Hosting
-Write-Host "2. Desplegando en Firebase Hosting..." -ForegroundColor Yellow
-& $firebaseBin use $proyecto
-& $firebaseBin deploy --only hosting
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[ERROR] Fallo el deploy en Firebase." -ForegroundColor Red
-    exit 1
-}
-Write-Host "[OK] Deploy en Firebase completado.`n" -ForegroundColor Green
-
-# 6. Git Commit, Tag y Push para GitHub Actions
-Write-Host "3. Subiendo cambios y activando GitHub Actions ($tag)..." -ForegroundColor Yellow
 git add .
 git commit -m "release: $tag"
 
@@ -99,7 +84,26 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "[ERROR] Fallo el push a GitHub." -ForegroundColor Red
     exit 1
 }
+Write-Host "[OK] Push a GitHub completado. GitHub Actions ya esta compilando.`n" -ForegroundColor Green
+
+# 5. Compilar Web
+Write-Host "2. Compilando Flutter Web..." -ForegroundColor Yellow
+flutter build web --release
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] Fallo la compilacion de Flutter." -ForegroundColor Red
+    exit 1
+}
+Write-Host "[OK] Compilacion lista.`n" -ForegroundColor Green
+
+# 6. Desplegar en Firebase Hosting con cuenta fija
+Write-Host "3. Desplegando en Firebase Hosting..." -ForegroundColor Yellow
+& $firebaseBin deploy --only hosting --project $proyecto --account $cuentaFirebase
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[ERROR] Fallo el deploy en Firebase." -ForegroundColor Red
+    exit 1
+}
+Write-Host "[OK] Deploy en Firebase completado.`n" -ForegroundColor Green
 
 Write-Host "`n=======================================================" -ForegroundColor Cyan
-Write-Host " VERSION $tag PUBLICADA Y SUBIDA A GITHUB ACTIONS" -ForegroundColor Cyan
+Write-Host " VERSION $tag SUBIDA A GITHUB ACTIONS Y PUBLICADA EN WEB" -ForegroundColor Cyan
 Write-Host "=======================================================`n" -ForegroundColor Cyan

@@ -860,8 +860,11 @@ class _VotacionFiguraWidgetState extends State<VotacionFiguraWidget> {
                       ? const BorderSide(color: Colors.amberAccent, width: 1.2)
                       : BorderSide.none,
                 ),
-                margin: const EdgeInsets.symmetric(vertical: 4),
+                margin: const EdgeInsets.symmetric(vertical: 1.5),
                 child: ListTile(
+                  minTileHeight: 34,
+                  minVerticalPadding: 0,
+                  visualDensity: const VisualDensity(vertical: -4),
                   onTap: (!_yaVote && _votacionAbierta)
                       ? () => _seleccionarJugador(nombre)
                       : null,
